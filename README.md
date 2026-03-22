@@ -58,11 +58,12 @@ wo_standalone/
 ├── db/
 │   ├── connection.py             # Thread-local connections + transaction()
 │   ├── migration_runner.py       # Read-only schema check at startup
-│   ├── migrations/               # 001–003, applied manually
-│   └── repository/               # property, unit, occupancy, movings
+│   ├── migrations/               # 001–004, applied manually
+│   └── repository/               # property, unit, occupancy, movings, users
 ├── domain/
 │   └── unit_identity.py          # normalize, parse, compose identity key
 ├── services/
+│   ├── auth_service.py           # Supabase Auth (GoTrue) wrapper
 │   ├── occupancy_service.py
 │   ├── property_service.py
 │   ├── unit_service.py
@@ -73,9 +74,10 @@ wo_standalone/
 │   └── report_operations/
 │       └── active_sr_report.py   # East/West ASR workbook builder
 └── ui/
-    ├── auth.py                   # Full / validator-only / disabled modes
+    ├── auth.py                   # Supabase Auth login + first-run bootstrap
     ├── import_movings_page.py
     └── screens/
+        ├── admin_page.py         # User management (admin-only)
         └── work_order_validator.py
 ```
 
@@ -114,10 +116,11 @@ DATABASE_SSLMODE  = "require"
 # Option B — Full URI
 # DATABASE_URL = "postgresql://postgres.ref:password@host:6543/postgres?pgbouncer=true"
 
-APP_USERNAME       = "admin"
-APP_PASSWORD       = "change-me"
-VALIDATOR_USERNAME = "validator"
-VALIDATOR_PASSWORD = "change-me"
+# Supabase Auth (Settings → API in Supabase Dashboard)
+SUPABASE_URL             = "https://your-project-ref.supabase.co"
+SUPABASE_ANON_KEY        = "eyJ..."
+SUPABASE_SERVICE_ROLE_KEY = "eyJ..."
+
 # AUTH_DISABLED    = "true"   # skip login for local dev
 ```
 
@@ -131,6 +134,7 @@ Run these **manually** in the Supabase SQL Editor (or any Postgres client), in o
 db/migrations/001_schema.sql
 db/migrations/002_unit_movings.sql
 db/migrations/003_unit_occupancy_global.sql
+db/migrations/004_users.sql
 ```
 
 The app verifies tables exist at startup but never applies migrations automatically.
@@ -156,17 +160,22 @@ Designed for **Streamlit Community Cloud** + **Supabase**:
 
 ## Authentication
 
-| Mode | Credentials | Access |
-|------|-------------|--------|
-| **Full** | `APP_USERNAME` / `APP_PASSWORD` | All features |
-| **Validator only** | `VALIDATOR_USERNAME` / `VALIDATOR_PASSWORD` | Validator + imports |
-| **Disabled** | `AUTH_DISABLED = "true"` | Skip login (local dev) |
+Powered by **Supabase Auth** (GoTrue). Passwords are managed by Supabase — no credentials stored in the app database.
+
+| Scenario | What happens |
+|----------|--------------|
+| **First run** (no users in DB) | "Create First Admin" form appears — no prior login needed |
+| **Admin user** (`is_admin = true`) | Full access to all properties + Admin page (user management) |
+| **Regular user** | Sees only properties assigned via `user_properties` |
+| **`AUTH_DISABLED = "true"`** | Skip login entirely (local dev) |
+
+Admins can create users, assign property access, and deactivate accounts from the **Admin** page in the sidebar.
 
 ---
 
 ## Database Schema
 
-Six tables across three migrations:
+Eight tables across four migrations:
 
 | Table | Purpose |
 |-------|---------|
@@ -176,6 +185,8 @@ Six tables across three migrations:
 | `unit` | Normalized unit with identity key, floor plan, sq ft |
 | `unit_occupancy_global` | Current move-in date per unit — drives classification |
 | `unit_movings` | Historical move-in log |
+| `users` | App-level profile keyed by Supabase Auth UUID |
+| `user_properties` | Maps users to the properties they can access |
 
 ---
 

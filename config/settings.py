@@ -139,10 +139,6 @@ def is_truthy_setting(key: str) -> bool:
 
 
 DATABASE_URL = get_setting("DATABASE_URL", "")
-APP_USERNAME = get_setting("APP_USERNAME", "")
-APP_PASSWORD = get_setting("APP_PASSWORD", "")
-VALIDATOR_USERNAME = get_setting("VALIDATOR_USERNAME", "")
-VALIDATOR_PASSWORD = get_setting("VALIDATOR_PASSWORD", "")
 AUTH_DISABLED = is_truthy_setting("AUTH_DISABLED")
 
 SUPABASE_URL = get_setting("SUPABASE_URL", "")

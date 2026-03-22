@@ -17,6 +17,7 @@ Migrations are applied manually — never run automatically. Apply in order via 
 db/migrations/001_schema.sql
 db/migrations/002_unit_movings.sql
 db/migrations/003_unit_occupancy_global.sql
+db/migrations/004_users.sql
 ```
 
 Migration runner at startup is **read-only** (verifies tables exist, does not apply changes).
@@ -32,10 +33,9 @@ DATABASE_USER = "postgres"
 DATABASE_NAME = "postgres"
 DATABASE_SSLMODE = "require"
 
-APP_USERNAME = "..."
-APP_PASSWORD = "..."
-VALIDATOR_USERNAME = "..."
-VALIDATOR_PASSWORD = "..."
+SUPABASE_URL = "https://your-project-ref.supabase.co"
+SUPABASE_ANON_KEY = "eyJ..."
+SUPABASE_SERVICE_ROLE_KEY = "eyJ..."
 # AUTH_DISABLED = "true"  # skip login for local dev
 ```
 
@@ -86,12 +86,15 @@ Pure functions for unit code handling — safe to unit-test with no mocking:
 
 Declarative pipeline using `FilterParams`, `SheetDef`, `ReportConfig` dataclasses. No hardcoded sheet logic — all layout is data-driven. File is 904 lines; if modifying, be aware it could be split into a filter engine + layout engine.
 
-### Authentication (`ui/auth.py`)
+### Authentication (`ui/auth.py` + `services/auth_service.py`)
 
-Three access modes based on secrets:
-- `"full"` — APP_USERNAME + APP_PASSWORD
-- `"validator_only"` — VALIDATOR_USERNAME + VALIDATOR_PASSWORD
-- `AUTH_DISABLED = "true"` — skip login entirely (local dev)
+Supabase Auth (GoTrue) handles email/password sign-in. App-level profiles live in the `users` table (keyed by Supabase Auth UUID); property access is controlled via `user_properties`.
+
+- **First run** — if `users` table is empty, a "Create First Admin" form appears (no prior auth needed)
+- **Admin** — `is_admin = true` users see all properties and the Admin page (user management)
+- **Regular user** — sees only properties assigned via `user_properties`
+- **`AUTH_DISABLED = "true"`** — skip login entirely (local dev)
+- **Admin page** (`ui/screens/admin_page.py`) — create users, assign properties, deactivate accounts
 
 ## Files to Watch
 
