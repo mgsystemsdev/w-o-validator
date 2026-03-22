@@ -31,12 +31,7 @@ def render_work_order_validator() -> None:
 
     property_id = st.session_state.get("property_id")
     if property_id is None:
-        if st.session_state.get("_work_order_standalone_app"):
-            st.info("Select or create a property in the sidebar.")
-        elif st.session_state.get("access_mode") == "validator_only":
-            st.info("Select a property in the sidebar, or contact an administrator if none are available.")
-        else:
-            st.info("Create a property in the Admin tab to begin.")
+        st.info("Select a property in the sidebar. If none are available, contact an administrator.")
         return
 
     tab_movein, tab_sr, tab_download = st.tabs(

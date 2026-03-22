@@ -18,6 +18,8 @@ _REQUIRED_TABLES = [
     "unit",
     "unit_occupancy_global",
     "unit_movings",
+    "users",
+    "user_properties",
 ]
 
 
