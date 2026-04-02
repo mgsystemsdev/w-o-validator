@@ -98,7 +98,7 @@ def main() -> int:
         return 1
 
     try:
-        conn = psycopg2.connect(url)
+        conn = psycopg2.connect(url, prepare_threshold=None)
     except TypeError:
         conn = psycopg2.connect(url)
     conn.autocommit = True
