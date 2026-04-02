@@ -15,6 +15,82 @@ def _cached_property_moving_log_bundle(property_id: int) -> dict:
     return unit_movings_service.get_property_moving_log_bundle(property_id)
 
 
+@st.cache_data(ttl=60)
+def _cached_report_move_in_log_rows(property_id: int) -> list[dict]:
+    log_rows, _ = occupancy_service.get_move_in_tables_bundle(property_id)
+    return log_rows
+
+
+def _dataframe_move_in_log(rows: list[dict]) -> tuple:
+    cols = ("Unit", "Move-in date", "Record updated")
+    if not rows:
+        return pd.DataFrame(columns=list(cols)), 0
+    _df = dataframe_for_streamlit(rows)
+    return (
+        _df.rename(
+            columns={
+                "unit": "Unit",
+                "move_in_date": "Move-in date",
+                "record_updated_at": "Record updated",
+            }
+        ),
+        len(rows),
+    )
+
+
+def _dataframe_moving_log_rows(rows: list[dict]) -> tuple:
+    cols = ("Unit", "Moving date", "Logged at")
+    if not rows:
+        return pd.DataFrame(columns=list(cols)), 0
+    _df = dataframe_for_streamlit(rows)
+    return (
+        _df.rename(
+            columns={
+                "unit": "Unit",
+                "moving_date": "Moving date",
+                "logged_at": "Logged at",
+            }
+        ),
+        len(rows),
+    )
+
+
+def _render_move_in_dates_table(property_id: int) -> None:
+    rows = _cached_report_move_in_log_rows(property_id)
+    st.markdown("**Move-in dates (this property)**")
+    st.caption(
+        "Loaded into ``unit_occupancy_global`` (Resident Activity, Pending Movings, etc.). "
+        "Sorted by unit code."
+    )
+    df, n = _dataframe_move_in_log(rows)
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        height=min(420, 28 + 24 * max(n, 6)),
+    )
+
+
+def _render_moving_log_entries_table(property_id: int) -> None:
+    bundle = _cached_property_moving_log_bundle(property_id)
+    rows = bundle["rows"]
+    st.markdown("**Moving log (this property)**")
+    st.caption(
+        "Rows in ``unit_movings`` whose unit matches this property’s **Units** roster. Newest first."
+    )
+    if bundle["unit_count"] == 0:
+        st.caption("No unit master for this property — import **Units** first; then imports can match.")
+    elif bundle["norm_key_count"] == 0:
+        st.caption("Roster has no usable unit codes in ``unit_code_raw`` / ``unit_code_norm``.")
+    df, n = _dataframe_moving_log_rows(rows)
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        height=min(420, 28 + 24 * max(n, 6)),
+    )
+
+
 def _load_moving_log_snapshot(property_id: int) -> dict | None:
     row = property_upload_snapshot_repository.get(
         property_id, property_upload_snapshot_repository.KIND_MOVING_LOG_IMPORT
@@ -50,11 +126,8 @@ def render_report_page() -> None:
         with st.container(border=True):
             st.markdown("**MOVING LOG**")
             st.caption(
-                "Import historical moving dates into the global ``unit_movings`` log. "
-                "Use a row with clear **unit** and **move / date** column headers (e.g. Unit + Move-In Date); "
-                "title rows above the table are skipped automatically. "
-                "Does not update move-in dates for WO classification — use **Pending Movings** or "
-                "**Work Order Validator → Move-In Data** for that."
+                "Spreadsheet with **unit** + **move / date** columns → global ``unit_movings``. "
+                "Does not set WO move-in dates; use **Pending Movings** for that."
             )
 
             ml_file = st.file_uploader(
@@ -102,20 +175,12 @@ def render_report_page() -> None:
                     f"**Already on file (official date unchanged):** {ao} · "
                     f"**Not imported:** {ni}"
                 )
-                st.caption(
-                    "Rows that are only spreadsheet titles or KPI lines (e.g. packet summaries) "
-                    "are ignored and do not appear in the table below."
-                )
+                st.caption("Title/KPI lines in the file are skipped.")
                 row_results = ml_res.get("row_results") or []
                 if row_results:
                     with st.container(border=True):
-                        st.markdown("**LAST IMPORT — ROW BY ROW**")
-                        st.caption(
-                            "Each data row from your file: unit, moving date, and outcome. "
-                            "**Already registered** means the system already had this move-in date on file — "
-                            "it is retained as the official moving date for that unit. "
-                            "Use **Not imported** rows to fix source data and re-import if needed."
-                        )
+                        st.markdown("**Last import — row outcomes**")
+                        st.caption("Per-row result from the file you loaded.")
                         _pm = dataframe_for_streamlit(row_results)
                         if not _pm.empty:
                             _pm = _pm.rename(
@@ -133,58 +198,18 @@ def render_report_page() -> None:
                         )
 
         with st.container(border=True):
-            st.markdown("**MOVING LOG ENTRIES**")
-            st.caption(
-                "Moving dates from ``unit_movings`` that **match units on this property** "
-                "(**Units** page unit master). Imports are stored globally by unit label — "
-                "if this list is empty after a successful import, those codes may not match "
-                "any row in the unit master for the selected property. Newest first."
-            )
-            bundle = _cached_property_moving_log_bundle(property_id)
-            log_table = bundle["rows"]
-            if bundle["unit_count"] == 0:
-                st.warning(
-                    "This property has **no unit roster** (no rows on the **Units** / unit master "
-                    "for this property). Moving log lines are matched to that roster — import units "
-                    "first, then entries will appear here."
-                )
-            elif bundle["norm_key_count"] == 0:
-                st.warning(
-                    "Units exist but no usable **unit codes** were found (empty "
-                    "``unit_code_raw`` / ``unit_code_norm``)."
-                )
-            elif log_table:
-                _df = dataframe_for_streamlit(log_table)
-                if not _df.empty:
-                    _df = _df.rename(
-                        columns={
-                            "unit": "Unit",
-                            "moving_date": "Moving date",
-                            "logged_at": "Logged at",
-                        }
-                    )
-                st.dataframe(
-                    _df,
-                    use_container_width=True,
-                    hide_index=True,
-                )
-            else:
-                st.caption(
-                    "No matching rows yet — load a moving log above (see **LAST IMPORT** for what "
-                    "was read), use **Pending Movings**, or confirm imported **Units** include the "
-                    "same unit codes as the file (after normalization)."
-                )
+            _render_move_in_dates_table(property_id)
+
+        with st.container(border=True):
+            _render_moving_log_entries_table(property_id)
 
     with tab_pending:
         with st.container(border=True):
             st.markdown("**PENDING MOVINGS**")
             st.caption(
-                "OneSite **Pending Move Ins** / pending movings export: table with **Unit** and "
-                "**Move-In Date** (``.csv`` / ``.xls`` / ``.xlsx``). Title rows above the header "
-                "row are detected automatically for Excel. Same data can use column names "
-                "**unit_number** and **move_in_date** (or **moving_date**). Updates "
-                "**unit_occupancy_global** for this property and appends matching rows to "
-                "**unit_movings**."
+                "**Pending Move Ins** / similar export: **Unit** + **Move-In Date** "
+                "(``.csv`` / ``.xls`` / ``.xlsx``). Updates occupancy for WO classification and "
+                "appends ``unit_movings``."
             )
 
             pm_file = st.file_uploader(
@@ -263,12 +288,10 @@ def render_report_page() -> None:
                     f"**Unresolved:** {pm_res['unresolved']} · **Logged to movings:** {pm_res['logged']}"
                 )
                 if session_only:
-                    st.info(
-                        "**Move-in dates and moving-log rows from this run are already saved** in "
-                        "`unit_occupancy_global` and `unit_movings`. What is missing is only the optional "
-                        "**import summary** row (file name, counts on this page after logout). "
-                        "That needs the `property_upload_snapshot` table — run "
-                        "**`db/migrations/005_property_upload_snapshot.sql`** in the Supabase SQL Editor."
+                    st.caption(
+                        "Import counts above are from this session only (DB snapshot row missing). "
+                        "Data is still saved; run ``005_property_upload_snapshot.sql`` to persist "
+                        "this banner after logout."
                     )
                 if pm_res.get("processed", 0) > 0 and pm_res.get("matched", 0) == 0:
                     st.warning(
@@ -276,7 +299,9 @@ def render_report_page() -> None:
                         "Import **Units.csv** on the **Units** page (codes like `4-27-0211` must match "
                         "**Location** / `unit_code` after normalization), then run this import again."
                     )
-                st.info(
-                    "Move-in preview tables under **Work Order Validator → Move-In Data** reflect "
-                    "this property’s occupancy store (cache was refreshed on last run)."
-                )
+
+        with st.container(border=True):
+            _render_move_in_dates_table(property_id)
+
+        with st.container(border=True):
+            _render_moving_log_entries_table(property_id)
