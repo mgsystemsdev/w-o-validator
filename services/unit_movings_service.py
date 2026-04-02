@@ -207,30 +207,58 @@ def import_historical_movings(file_content: bytes, filename: str) -> dict:
 
     inserted = 0
     skipped = 0
+    row_results: list[dict] = []
 
     for _, row in df.iterrows():
-        unit_number = normalize_moving_unit_key(row.get("unit_number", ""))
-        if not unit_number:
-            skipped += 1
-            continue
+        raw_unit = row.get("unit_number", "")
+        unit_str = "" if raw_unit is None or (isinstance(raw_unit, float) and pd.isna(raw_unit)) else str(raw_unit).strip()
+        unit_number = normalize_moving_unit_key(raw_unit if unit_str else "")
 
         raw_date = row.get("moving_date")
-        if pd.isna(raw_date):
+        status = ""
+        parsed_date: date | None = None
+
+        if not unit_number:
             skipped += 1
+            status = "Skipped — empty or unparseable unit"
+            row_results.append(
+                {"unit": unit_str or "(blank)", "moving_date": None, "status": status}
+            )
+            continue
+
+        if pd.isna(raw_date) or (
+            isinstance(raw_date, str) and not str(raw_date).strip()
+        ):
+            skipped += 1
+            status = "Skipped — missing date"
+            row_results.append(
+                {"unit": unit_str, "moving_date": None, "status": status}
+            )
             continue
 
         moving_date = parse_one_date_cell(raw_date)
         if moving_date is None:
             skipped += 1
+            status = "Skipped — date not recognized (check Excel / format)"
+            row_results.append(
+                {"unit": unit_str, "moving_date": None, "status": status}
+            )
             continue
 
+        parsed_date = moving_date
         result = unit_movings_repository.insert_moving(unit_number, moving_date)
         if result is not None:
             inserted += 1
+            status = "Inserted"
         else:
             skipped += 1
+            status = "Skipped — duplicate (same unit + date already in log)"
 
-    return {"inserted": inserted, "skipped": skipped}
+        row_results.append(
+            {"unit": unit_str, "moving_date": parsed_date, "status": status}
+        )
+
+    return {"inserted": inserted, "skipped": skipped, "row_results": row_results}
 
 
 def get_latest_movings_lookup() -> dict[str, date]:

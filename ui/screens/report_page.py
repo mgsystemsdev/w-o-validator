@@ -2,37 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
 
-import pandas as pd
 import streamlit as st
 
-from domain.dates import format_us_date
 from services import occupancy_service, unit_movings_service
+from ui.dataframe_display import dataframe_for_streamlit
 
 
 @st.cache_data(ttl=60)
 def _cached_property_moving_log(property_id: int) -> list[dict]:
     return unit_movings_service.get_property_moving_log_rows(property_id)
-
-
-def _moving_log_dataframe(rows: list[dict]) -> pd.DataFrame:
-    """Format dates for Streamlit display."""
-    df = pd.DataFrame(rows)
-    if df.empty:
-        return df
-    for col in df.columns:
-        if pd.api.types.is_datetime64_any_dtype(df[col]):
-            df[col] = df[col].apply(lambda x: format_us_date(x) if pd.notna(x) else "")
-        elif df[col].dtype == object:
-            df[col] = df[col].apply(
-                lambda x: (
-                    format_us_date(x)
-                    if isinstance(x, (date, datetime))
-                    else ("" if x is None or (isinstance(x, float) and pd.isna(x)) else x)
-                )
-            )
-    return df
 
 
 def render_report_page() -> None:
@@ -90,25 +69,51 @@ def render_report_page() -> None:
                     f"**Inserted:** {ml_res['inserted']} · **Skipped:** {ml_res['skipped']} "
                     "(duplicates or invalid rows count as skipped)."
                 )
+                row_results = ml_res.get("row_results") or []
+                if row_results:
+                    with st.container(border=True):
+                        st.markdown("**LAST IMPORT — ROW BY ROW**")
+                        st.caption(
+                            "Parsed from your file: unit, moving date (when recognized), and outcome. "
+                            "Fix source data or remove duplicates, then re-import if needed."
+                        )
+                        _pm = dataframe_for_streamlit(row_results)
+                        if not _pm.empty:
+                            _pm = _pm.rename(
+                                columns={
+                                    "unit": "Unit",
+                                    "moving_date": "Moving date",
+                                    "status": "Outcome",
+                                }
+                            )
+                        st.dataframe(
+                            _pm,
+                            use_container_width=True,
+                            hide_index=True,
+                            height=min(420, 28 + 24 * len(row_results)),
+                        )
 
         with st.container(border=True):
             st.markdown("**MOVING LOG ENTRIES**")
             st.caption(
-                "All moving dates stored in ``unit_movings`` for units on this property "
-                "(includes imports from this tab and **Pending Movings**). Newest first."
+                "Moving dates from ``unit_movings`` that **match units on this property** "
+                "(**Units** page unit master). Imports are stored globally by unit label — "
+                "if this list is empty after a successful import, those codes may not match "
+                "any row in the unit master for the selected property. Newest first."
             )
             log_table = _cached_property_moving_log(property_id)
             if log_table:
                 st.dataframe(
-                    _moving_log_dataframe(log_table),
+                    dataframe_for_streamlit(log_table),
                     use_container_width=True,
                     hide_index=True,
                     height=400,
                 )
             else:
                 st.caption(
-                    "No rows yet — load a moving log above, or use **Pending Movings** / other flows "
-                    "that write to ``unit_movings``."
+                    "No matching rows yet — load a moving log above (see **LAST IMPORT** for what "
+                    "was read), use **Pending Movings**, or confirm imported **Units** include the "
+                    "same unit codes as the file."
                 )
 
     with tab_pending:
