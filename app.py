@@ -16,6 +16,7 @@ from db.migration_runner import assert_schema_ready
 from services import property_service
 from ui.auth import require_auth, sign_out_current_user
 from ui.screens.admin_page import render_admin_page
+from ui.screens.report_page import render_report_page
 from ui.screens.work_order_validator import render_work_order_validator
 from ui.units_page import render_units
 
