@@ -21,6 +21,7 @@ import pandas as pd
 
 from db.repository import occupancy_repository, unit_repository, unit_movings_repository
 from domain.unit_identity import normalize_unit_code
+from services.pandas_dates import coerce_datetime_series
 from services.parsers import resident_activity_parser
 
 logger = logging.getLogger(__name__)

@@ -1,8 +1,10 @@
-"""Report screen: moving log and pending movings (UI scaffold)."""
+"""Report screen: moving log import and pending movings ingest."""
 
 from __future__ import annotations
 
 import streamlit as st
+
+from services import occupancy_service, unit_movings_service
 
 
 def render_report_page() -> None:
@@ -19,51 +21,92 @@ def render_report_page() -> None:
         with st.container(border=True):
             st.markdown("**MOVING LOG**")
             st.caption(
-                "View or import moving history for this property. "
-                "Move-in data tables live under **Work Order Validator → Move-In Data**."
+                "Import historical moving dates into the global ``unit_movings`` log "
+                "(columns: **unit_number**, **moving_date** — or **unit** / **move_in_date**). "
+                "Does not update move-in dates for WO classification; use **Pending Movings** or "
+                "**Work Order Validator → Move-In Data** for that."
             )
 
-            st.file_uploader(
+            ml_file = st.file_uploader(
                 "Moving log source (.xls / .xlsx / .csv)",
                 type=["xls", "xlsx", "csv"],
                 key="report_moving_log_upload",
-                disabled=True,
             )
 
-            st.button(
+            if st.button(
                 "Load moving log",
                 key="report_moving_log_ingest_btn",
-                disabled=True,
-                help="Placeholder — no ingestion wired yet.",
-            )
+                disabled=ml_file is None,
+            ):
+                with st.spinner("Importing moving log…"):
+                    try:
+                        result = unit_movings_service.import_historical_movings(
+                            ml_file.getvalue(),
+                            filename=ml_file.name,
+                        )
+                        st.session_state.report_moving_log_result = result
+                        st.session_state.report_moving_log_error = None
+                    except Exception as exc:  # noqa: BLE001
+                        st.session_state.report_moving_log_result = None
+                        st.session_state.report_moving_log_error = str(exc)
+                st.rerun()
 
-            st.info(
-                "Loaded move-in rows and units-with-dates tables are on the **Move-In Data** tab."
-            )
+            ml_err = st.session_state.get("report_moving_log_error")
+            ml_res = st.session_state.get("report_moving_log_result")
+            if ml_err:
+                st.error(f"Import failed: {ml_err}")
+            if ml_res:
+                st.success(
+                    f"**Inserted:** {ml_res['inserted']} · **Skipped:** {ml_res['skipped']} "
+                    "(duplicates or invalid rows count as skipped)."
+                )
 
     with tab_pending:
         with st.container(border=True):
             st.markdown("**PENDING MOVINGS**")
             st.caption(
-                "Review moves that are scheduled or in progress. "
-                "When connected, this area will list pending movings and actions (not implemented yet)."
+                "Upload a Pending Movings export with **unit_number** and **move_in_date** "
+                "(or **moving_date**). Updates **unit_occupancy_global** for this property and "
+                "appends matching rows to **unit_movings**."
             )
 
-            st.file_uploader(
+            pm_file = st.file_uploader(
                 "Pending movings export (.xls / .xlsx)",
                 type=["xls", "xlsx"],
                 key="report_pending_movings_upload",
-                disabled=True,
             )
 
-            st.button(
-                "Refresh pending list",
+            if st.button(
+                "Load pending movings",
                 key="report_pending_refresh_btn",
-                disabled=True,
-                help="Placeholder — no backend yet.",
-            )
+                disabled=pm_file is None,
+                help="Parses file and applies occupancy + moving log for the selected property.",
+            ):
+                with st.spinner("Loading pending movings…"):
+                    try:
+                        result = occupancy_service.ingest_pending_movings(
+                            property_id,
+                            pm_file.getvalue(),
+                            filename=pm_file.name,
+                        )
+                        st.session_state.report_pending_result = result
+                        st.session_state.report_pending_error = None
+                        st.cache_data.clear()
+                    except Exception as exc:  # noqa: BLE001
+                        st.session_state.report_pending_result = None
+                        st.session_state.report_pending_error = str(exc)
+                st.rerun()
 
-            st.info(
-                "Pending movings are not connected yet. "
-                "This tab mirrors the Work Order Validator layout for a future workflow."
-            )
+            pm_err = st.session_state.get("report_pending_error")
+            pm_res = st.session_state.get("report_pending_result")
+            if pm_err:
+                st.error(f"Import failed: {pm_err}")
+            if pm_res:
+                st.success(
+                    f"**Processed:** {pm_res['processed']} · **Matched:** {pm_res['matched']} · "
+                    f"**Unresolved:** {pm_res['unresolved']} · **Logged to movings:** {pm_res['logged']}"
+                )
+                st.info(
+                    "Move-in preview tables under **Work Order Validator → Move-In Data** were "
+                    "refreshed (cache cleared)."
+                )

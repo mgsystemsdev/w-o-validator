@@ -30,16 +30,34 @@ def normalize_moving_unit_key(raw: str | None) -> str:
 def import_historical_movings(file_content: bytes, filename: str) -> dict:
     """Import historical movings from an uploaded spreadsheet.
 
-    Expected columns: unit_number, moving_date (.csv or .xlsx).
+    Expected columns: ``unit_number`` (or ``unit``, ``unit_code``), ``moving_date``
+    (or ``move_in_date``). Accepts ``.csv``, ``.xls``, ``.xlsx``.
+
     Returns {"inserted": int, "skipped": int}.
     """
+    ext = filename.rsplit(".", 1)[-1].lower()
     try:
-        if filename.endswith(".xlsx"):
+        if ext in ("xls", "xlsx"):
             df = pd.read_excel(io.BytesIO(file_content))
         else:
             df = pd.read_csv(io.BytesIO(file_content))
     except Exception as exc:
         raise ValueError(f"Unable to parse file: {exc}") from exc
+
+    df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+    if "unit_number" not in df.columns:
+        for alt in ("unit", "unit_code"):
+            if alt in df.columns:
+                df = df.rename(columns={alt: "unit_number"})
+                break
+    if "moving_date" not in df.columns and "move_in_date" in df.columns:
+        df = df.rename(columns={"move_in_date": "moving_date"})
+    if "unit_number" not in df.columns or "moving_date" not in df.columns:
+        raise ValueError(
+            "File must include unit and date columns "
+            "(e.g. unit_number + moving_date). "
+            f"Found: {', '.join(df.columns.tolist())}"
+        )
 
     inserted = 0
     skipped = 0
