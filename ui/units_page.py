@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from services import property_service, unit_service
+from ui.dataframe_display import dataframe_for_streamlit
 
 _UNIT_CODE_ALIASES = {"Unit", "unit", "Unit Number", "unit_number", "UnitCode", "Unit Code"}
 
