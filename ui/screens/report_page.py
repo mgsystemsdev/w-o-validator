@@ -1,8 +1,16 @@
-"""Report screen: moving log and pending movings (UI scaffold — not wired to services)."""
+"""Report screen: moving log and pending movings."""
 
 from __future__ import annotations
 
+import pandas as pd
 import streamlit as st
+
+from services import unit_movings_service
+
+
+@st.cache_data(ttl=60)
+def _cached_moving_log_bundle(property_id: int) -> tuple[list[dict], list[dict]]:
+    return unit_movings_service.get_property_moving_log_bundle(property_id)
 
 
 def render_report_page() -> None:
@@ -37,10 +45,37 @@ def render_report_page() -> None:
                 help="Placeholder — no ingestion wired yet.",
             )
 
-            st.info(
-                "Moving log tools are not connected yet. "
-                "This tab mirrors the Work Order Validator layout for a future workflow."
+        log_rows, units_with_movings = _cached_moving_log_bundle(property_id)
+
+        with st.container(border=True):
+            st.markdown("**LOADED MOVING DATA**")
+            st.caption(
+                "Moving log entries from the database that match units on this property "
+                "(same source as historical / pending movings imports)."
             )
+            if log_rows:
+                st.dataframe(
+                    pd.DataFrame(log_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.caption("No moving log rows matched to this property’s units yet.")
+
+        with st.container(border=True):
+            st.markdown("**UNITS WITH MOVING DATES**")
+            st.caption(
+                "Imported units for this property with all matching moving dates "
+                "(same columns as **Imported Units** on the Units page, plus moving dates)."
+            )
+            if units_with_movings:
+                st.dataframe(
+                    pd.DataFrame(units_with_movings),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.caption("No imported units yet — import a unit master on the Units page first.")
 
     with tab_pending:
         with st.container(border=True):

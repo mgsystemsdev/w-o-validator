@@ -39,3 +39,21 @@ def get_latest_movings_by_unit() -> dict[str, date]:
         )
         rows = cur.fetchall()
     return {row["unit_number"]: row["moving_date"] for row in rows}
+
+
+def list_movings_for_unit_numbers(unit_numbers: list[str] | tuple[str, ...]) -> list[dict]:
+    """Return moving rows whose ``unit_number`` exactly matches any candidate string."""
+    if not unit_numbers:
+        return []
+    conn = get_connection()
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT id, unit_number, moving_date, created_at
+            FROM unit_movings
+            WHERE unit_number = ANY(%s)
+            ORDER BY moving_date DESC, unit_number ASC
+            """,
+            (list(unit_numbers),),
+        )
+        return cur.fetchall()
