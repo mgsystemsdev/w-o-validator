@@ -77,7 +77,7 @@ def _render_sidebar() -> str:
                         st.error(f"Failed to create property: {exc}")
 
         st.divider()
-        pages = ["Work Order Validator", "Units", "Report"]
+        pages = ["Work Order Validator", "Report", "Units"]
         if is_admin:
             pages.append("Admin")
         page = st.radio(
