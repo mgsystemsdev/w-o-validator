@@ -36,6 +36,14 @@ def render_report_page() -> None:
         st.info("Select a property in the sidebar. If none are available, contact an administrator.")
         return
 
+    # Pending movings feedback is stored in session when DB snapshot is unavailable (migration 005).
+    prev_pid = st.session_state.get("_report_active_property_id")
+    if prev_pid != property_id:
+        st.session_state["_report_active_property_id"] = property_id
+        st.session_state.pop("report_pending_last_result", None)
+        st.session_state.pop("report_pending_error", None)
+        st.session_state.pop("report_moving_log_error", None)
+
     tab_moving_log, tab_pending = st.tabs(["Moving Log", "Pending Movings"])
 
     with tab_moving_log:
@@ -190,12 +198,17 @@ def render_report_page() -> None:
             ):
                 with st.spinner("Loading pending movings…"):
                     try:
-                        occupancy_service.ingest_pending_movings(
+                        result = occupancy_service.ingest_pending_movings(
                             property_id,
                             pm_file.getvalue(),
                             filename=pm_file.name,
                         )
                         st.session_state.report_pending_error = None
+                        st.session_state["report_pending_last_result"] = {
+                            "property_id": property_id,
+                            **result,
+                            "source_filename": pm_file.name,
+                        }
                         st.cache_data.clear()
                     except Exception as exc:  # noqa: BLE001
                         st.session_state.report_pending_error = str(exc)
@@ -206,15 +219,60 @@ def render_report_page() -> None:
                 st.error(f"Import failed: {pm_err}")
 
             pm_row = _load_pending_snapshot(property_id)
-            if pm_row:
+            last_pm = st.session_state.get("report_pending_last_result")
+            if last_pm and last_pm.get("property_id") != property_id:
+                last_pm = None
+
+            pm_res: dict | None = None
+            pm_when: str | None = None
+            pfn = "—"
+            session_only = False
+
+            # Prefer session result when present so a failed snapshot upsert does not show stale DB.
+            if last_pm:
+                pm_res = {
+                    "processed": last_pm["processed"],
+                    "matched": last_pm["matched"],
+                    "unresolved": last_pm["unresolved"],
+                    "logged": last_pm["logged"],
+                }
+                pfn = last_pm.get("source_filename") or "—"
+                if pm_row:
+                    pm_when = format_us_datetime(pm_row["updated_at"])
+                    db_fn = (pm_row.get("payload") or {}).get("source_filename")
+                    session_only = db_fn != pfn
+                else:
+                    session_only = True
+            elif pm_row:
                 pm_res = pm_row["payload"]
                 pm_when = format_us_datetime(pm_row["updated_at"])
                 pfn = pm_res.get("source_filename") or "—"
-                st.caption(f"Last pending movings file processed: **{pfn}** · **{pm_when}**")
+
+            if pm_res:
+                if pm_when:
+                    st.caption(
+                        f"Last pending movings file processed: **{pfn}** · **{pm_when}**"
+                    )
+                else:
+                    st.caption(f"Last pending movings file processed: **{pfn}**")
+                if session_only:
+                    st.info(
+                        "Import completed, but no **snapshot row** was found in the database "
+                        "(often the `property_upload_snapshot` table is missing). "
+                        "Apply **`db/migrations/005_property_upload_snapshot.sql`** in the Supabase "
+                        "SQL Editor so results persist across sessions; move-in updates from this run "
+                        "may still have been saved."
+                    )
                 st.success(
                     f"**Processed:** {pm_res['processed']} · **Matched:** {pm_res['matched']} · "
                     f"**Unresolved:** {pm_res['unresolved']} · **Logged to movings:** {pm_res['logged']}"
                 )
+                if pm_res.get("processed", 0) > 0 and pm_res.get("matched", 0) == 0:
+                    st.warning(
+                        "**No units matched** this property’s unit master. "
+                        "Import **Units.csv** on the **Units** page (codes like `4-27-0211` must match "
+                        "**Location** / `unit_code` after normalization), then run this import again."
+                    )
                 st.info(
                     "Move-in preview tables under **Work Order Validator → Move-In Data** reflect "
                     "this property’s occupancy store (cache was refreshed on last run)."
