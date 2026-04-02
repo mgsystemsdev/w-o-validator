@@ -244,3 +244,65 @@ def get_latest_movings_lookup() -> dict[str, date]:
         if nk not in merged or moving_date > merged[nk]:
             merged[nk] = moving_date
     return merged
+
+
+def _norm_keys_and_candidates(units: list[dict]) -> tuple[set[str], list[str]]:
+    """Build normalized identity keys and DB string candidates for property units."""
+    norm_keys: set[str] = set()
+    candidates: set[str] = set()
+    for u in units:
+        for key in ("unit_code_norm", "unit_code_raw"):
+            val = u.get(key)
+            if not val:
+                continue
+            s = str(val).strip()
+            if not s:
+                continue
+            candidates.add(s)
+            nk = normalize_unit_code(s)
+            if nk:
+                norm_keys.add(nk)
+                candidates.add(nk)
+    return norm_keys, list(candidates)
+
+
+def get_property_moving_log_rows(property_id: int) -> list[dict]:
+    """Rows from ``unit_movings`` that match units on this property (newest dates first).
+
+    Each dict: ``unit`` (display code), ``moving_date``, ``logged_at``.
+    """
+    units = unit_repository.get_by_property(property_id, active_only=False)
+    if not units:
+        return []
+
+    norm_keys, candidates = _norm_keys_and_candidates(units)
+    raw_movings = unit_movings_repository.list_movings_for_unit_numbers(candidates)
+    movings = [
+        m
+        for m in raw_movings
+        if normalize_moving_unit_key(m["unit_number"]) in norm_keys
+    ]
+    movings.sort(key=lambda m: (m["moving_date"], m["unit_number"]), reverse=True)
+
+    norm_to_display: dict[str, str] = {}
+    for u in units:
+        disp = (u.get("unit_code_raw") or u.get("unit_code_norm") or "").strip()
+        for key in ("unit_code_raw", "unit_code_norm"):
+            val = u.get(key)
+            if not val:
+                continue
+            nk = normalize_unit_code(str(val).strip())
+            if nk:
+                norm_to_display[nk] = disp or str(val).strip()
+
+    rows: list[dict] = []
+    for m in movings:
+        nk = normalize_moving_unit_key(m["unit_number"])
+        rows.append(
+            {
+                "unit": norm_to_display.get(nk, m["unit_number"]),
+                "moving_date": m["moving_date"],
+                "logged_at": m["created_at"],
+            }
+        )
+    return rows
