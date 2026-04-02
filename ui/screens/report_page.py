@@ -21,9 +21,10 @@ def render_report_page() -> None:
         with st.container(border=True):
             st.markdown("**MOVING LOG**")
             st.caption(
-                "Import historical moving dates into the global ``unit_movings`` log "
-                "(columns: **unit_number**, **moving_date** — or **unit** / **move_in_date**). "
-                "Does not update move-in dates for WO classification; use **Pending Movings** or "
+                "Import historical moving dates into the global ``unit_movings`` log. "
+                "Use a row with clear **unit** and **move / date** column headers (e.g. Unit + Move-In Date); "
+                "title rows above the table are skipped automatically. "
+                "Does not update move-in dates for WO classification — use **Pending Movings** or "
                 "**Work Order Validator → Move-In Data** for that."
             )
 

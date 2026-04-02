@@ -107,7 +107,11 @@ def render_units() -> None:
         st.markdown("**IMPORTED UNITS**")
         imported_units = _cached_list_unit_master_import_units(property_id)
         if imported_units:
-            st.dataframe(pd.DataFrame(imported_units), use_container_width=True, hide_index=True)
+            st.dataframe(
+                dataframe_for_streamlit(imported_units),
+                use_container_width=True,
+                hide_index=True,
+            )
         else:
             st.caption("No units imported yet.")
 

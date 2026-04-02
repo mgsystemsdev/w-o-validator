@@ -8,36 +8,16 @@ from __future__ import annotations
 
 from datetime import date
 
-import pandas as pd
 import streamlit as st
 
 from domain.dates import format_us_date
 from services import occupancy_service, work_order_validator_service
+from ui.dataframe_display import dataframe_for_streamlit
 from services import work_order_excel
 from services.report_operations import active_sr_report
 
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-
-def _dataframe_with_us_dates(rows: list[dict]) -> pd.DataFrame:
-    """Render move-in / occupancy tables with mm/dd/yyyy in Streamlit."""
-    df = pd.DataFrame(rows)
-    if df.empty:
-        return df
-    for col in df.columns:
-        if pd.api.types.is_datetime64_any_dtype(df[col]):
-            df[col] = df[col].apply(
-                lambda x: format_us_date(x) if pd.notna(x) else ""
-            )
-        elif df[col].dtype == object:
-            df[col] = df[col].apply(
-                lambda x: (
-                    format_us_date(x)
-                    if isinstance(x, (date, pd.Timestamp))
-                    else ("" if x is None or (isinstance(x, float) and pd.isna(x)) else x)
-                )
-            )
-    return df
 
 _WO_STATE_KEYS = (
     "wo_report_bytes",
@@ -234,7 +214,7 @@ def _render_wo_preview_section() -> None:
         if preview:
             st.caption(f"**{len(preview)}** work orders.")
             st.dataframe(
-                pd.DataFrame(preview),
+                dataframe_for_streamlit(preview),
                 use_container_width=True,
                 hide_index=True,
                 height=400,
@@ -255,7 +235,7 @@ def _render_move_in_tables(property_id: int) -> None:
         )
         if log_rows:
             st.dataframe(
-                _dataframe_with_us_dates(log_rows),
+                dataframe_for_streamlit(log_rows),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -270,7 +250,7 @@ def _render_move_in_tables(property_id: int) -> None:
         )
         if units_with_move_in:
             st.dataframe(
-                _dataframe_with_us_dates(units_with_move_in),
+                dataframe_for_streamlit(units_with_move_in),
                 use_container_width=True,
                 hide_index=True,
             )
