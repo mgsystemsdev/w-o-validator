@@ -12,6 +12,7 @@ No changes needed in the repository, validator, or output layer.
 
 from __future__ import annotations
 
+import csv
 import logging
 from datetime import date
 
@@ -28,8 +29,151 @@ from db.repository import (
 from domain.unit_identity import normalize_unit_code
 from services.pandas_dates import coerce_datetime_series
 from services.parsers import resident_activity_parser
+from services.unit_movings_service import (
+    _dataframe_from_detected_columns,
+    _detect_unit_and_date_columns,
+    _normalize_header_label,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _pending_normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [_normalize_header_label(c) for c in df.columns]
+    if "unit_number" not in df.columns:
+        for alt in ("unit", "unit_code", "building_unit", "bldg_unit"):
+            if alt in df.columns:
+                df = df.rename(columns={alt: "unit_number"})
+                break
+    if "move_in_date" not in df.columns and "moving_date" in df.columns:
+        df = df.rename(columns={"moving_date": "move_in_date"})
+    return df
+
+
+def _pending_csv_ragged_to_dataframe(file_content: bytes) -> pd.DataFrame:
+    """Build a grid from ragged exports (title lines + wide data rows) without dropping rows."""
+    text = None
+    for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+        try:
+            text = file_content.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        raise ValueError("Could not decode CSV (tried UTF-8 and Latin-1).")
+
+    rows: list[list[str]] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = next(csv.reader([line]))
+        except csv.Error:
+            continue
+        rows.append([str(c).strip() for c in row])
+
+    if not rows:
+        raise ValueError("CSV contained no readable rows.")
+
+    max_w = max(len(r) for r in rows)
+    padded = [r + [""] * (max_w - len(r)) for r in rows]
+    return pd.DataFrame(padded, dtype=str)
+
+
+def _read_pending_movings_csv(file_content: bytes) -> pd.DataFrame:
+    """Read Pending Movings CSV when exports have title rows or uneven lines (PMS exports)."""
+    encodings = ("utf-8-sig", "utf-8", "cp1252", "latin-1")
+    seps = (",", ";", "\t")
+
+    for encoding in encodings:
+        for sep in seps:
+            try:
+                df = pd.read_csv(
+                    io.BytesIO(file_content),
+                    dtype=str,
+                    sep=sep,
+                    encoding=encoding,
+                    engine="python",
+                    on_bad_lines="skip",
+                )
+                if df.shape[1] < 2:
+                    continue
+                df = _pending_normalize_columns(df)
+                if "unit_number" in df.columns and "move_in_date" in df.columns:
+                    return df
+            except Exception:
+                continue
+
+    for encoding in encodings:
+        for sep in seps:
+            try:
+                raw = pd.read_csv(
+                    io.BytesIO(file_content),
+                    header=None,
+                    dtype=str,
+                    sep=sep,
+                    encoding=encoding,
+                    engine="python",
+                    on_bad_lines="skip",
+                )
+                if raw.shape[1] < 2:
+                    continue
+                det = _detect_unit_and_date_columns(raw)
+                if det is None:
+                    continue
+                hr, uc, dc = det
+                out = _dataframe_from_detected_columns(raw, hr, uc, dc).rename(
+                    columns={"moving_date": "move_in_date"}
+                )
+                logger.info(
+                    "occupancy_service._read_pending_movings_csv: header row %s, "
+                    "unit col %s, date col %s, sep=%r encoding=%s",
+                    hr,
+                    uc,
+                    dc,
+                    sep,
+                    encoding,
+                )
+                return out
+            except Exception:
+                continue
+
+    try:
+        raw = _pending_csv_ragged_to_dataframe(file_content)
+        if raw.shape[1] >= 2:
+            det = _detect_unit_and_date_columns(raw)
+            if det is not None:
+                hr, uc, dc = det
+                out = _dataframe_from_detected_columns(raw, hr, uc, dc).rename(
+                    columns={"moving_date": "move_in_date"}
+                )
+                logger.info(
+                    "occupancy_service._read_pending_movings_csv: ragged parse, "
+                    "header row %s, unit col %s, date col %s",
+                    hr,
+                    uc,
+                    dc,
+                )
+                return out
+    except ValueError:
+        raise
+    except Exception:
+        pass
+
+    raise ValueError(
+        "Could not parse this CSV. Typical fixes: export again as comma-separated UTF-8, "
+        "or remove title rows above the column headers so the first table row names "
+        "the unit and move-in date columns (e.g. Unit / Move-In Date)."
+    )
+
+
+def _read_pending_movings_dataframe(file_content: bytes, filename: str) -> pd.DataFrame:
+    ext = filename.rsplit(".", 1)[-1].lower()
+    if ext in ("xls", "xlsx"):
+        df = pd.read_excel(io.BytesIO(file_content), dtype=str)
+        return _pending_normalize_columns(df)
+    return _read_pending_movings_csv(file_content)
 
 
 def ingest(property_id: int, records: list[dict]) -> dict:
@@ -151,20 +295,14 @@ def ingest_pending_movings(
     Returns:
         {\"processed\": int, \"matched\": int, \"unresolved\": int, \"logged\": int}
     """
-    ext = filename.rsplit(".", 1)[-1].lower()
     try:
-        if ext in ("xls", "xlsx"):
-            df = pd.read_excel(io.BytesIO(file_content), dtype=str)
-        else:
-            df = pd.read_csv(io.BytesIO(file_content), dtype=str)
+        df = _read_pending_movings_dataframe(file_content, filename)
+    except ValueError:
+        raise
     except Exception as exc:
         raise ValueError(f"Could not parse file '{filename}': {exc}") from exc
 
-    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-
-    # Accept move_in_date or moving_date as the date column
-    if "move_in_date" not in df.columns and "moving_date" in df.columns:
-        df = df.rename(columns={"moving_date": "move_in_date"})
+    df = _pending_normalize_columns(df)
 
     missing = [c for c in ("unit_number", "move_in_date") if c not in df.columns]
     if missing:

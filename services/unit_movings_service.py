@@ -55,6 +55,10 @@ def _date_header_score(norm: str) -> int:
         return 100
     if "move" in norm and "in" in norm:
         return 95
+    if "pending" in norm and "move" in norm:
+        return 94
+    if "scheduled" in norm and "move" in norm:
+        return 93
     if "moving" in norm or "move_in" in norm:
         return 90
     if "lease" in norm and ("start" in norm or "begin" in norm):
