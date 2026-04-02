@@ -1,4 +1,4 @@
-"""Import screen: unit master (WO prerequisite) + historical unit movings."""
+"""Units screen: unit master import (WO prerequisite)."""
 
 from __future__ import annotations
 
@@ -8,9 +8,6 @@ import pandas as pd
 import streamlit as st
 
 from services import property_service, unit_service
-from services.occupancy_service import ingest_pending_movings
-from services.unit_movings_service import import_historical_movings
-
 
 _UNIT_CODE_ALIASES = {"Unit", "unit", "Unit Number", "unit_number", "UnitCode", "Unit Code"}
 
@@ -74,8 +71,8 @@ def _cached_list_unit_master_import_units(property_id: int) -> list[dict]:
     return unit_service.list_unit_master_import_units(property_id)
 
 
-def render_import_movings() -> None:
-    st.title("Import movings")
+def render_units() -> None:
+    st.title("Units")
 
     property_id = st.session_state.get("property_id")
     if property_id is None:
@@ -113,64 +110,6 @@ def render_import_movings() -> None:
             st.dataframe(pd.DataFrame(imported_units), use_container_width=True, hide_index=True)
         else:
             st.caption("No units imported yet.")
-
-    with st.container(border=True):
-        st.markdown("**PENDING MOVINGS — DAILY UPDATE**")
-        st.caption(
-            "Upload today's pending move-in list (.csv or .xlsx). "
-            "Required columns: **unit_number**, **move_in_date**. "
-            "Each row updates **unit_occupancy_global** so the WO Validator "
-            "immediately uses the fresh date for classification. "
-            "Rows are also appended to the **unit_movings** historical log."
-        )
-        pm_file = st.file_uploader(
-            "Pending Movings file",
-            type=["csv", "xlsx"],
-            key="wo_pending_movings_file",
-        )
-        if st.button("Upload Pending Movings", key="wo_pending_movings_run", disabled=pm_file is None):
-            if pm_file is not None:
-                try:
-                    result = ingest_pending_movings(
-                        property_id, pm_file.read(), pm_file.name
-                    )
-                    st.success(
-                        f"**Processed:** {result['processed']} · "
-                        f"**Updated:** {result['matched']} · "
-                        f"**Unresolved:** {result['unresolved']} · "
-                        f"**Logged:** {result['logged']}"
-                    )
-                    if result["unresolved"]:
-                        st.warning(
-                            f"{result['unresolved']} unit(s) not found in the unit master. "
-                            "Run a Unit Master Import first if units are missing."
-                        )
-                    st.cache_data.clear()
-                except ValueError as exc:
-                    st.error(str(exc))
-
-    with st.container(border=True):
-        st.markdown("**HISTORICAL UNIT MOVINGS**")
-        st.caption(
-            "Spreadsheet columns: **unit_number**, **moving_date** (.csv or .xlsx). "
-            "Rows append to **unit_movings** (global by normalized unit key). "
-            "Historical movings are stored but not yet used in classification (parity mode)."
-        )
-        mov_file = st.file_uploader(
-            "Movings file",
-            type=["csv", "xlsx"],
-            key="wo_movings_file",
-        )
-        if st.button("Import movings", key="wo_movings_run", disabled=mov_file is None):
-            if mov_file is None:
-                return
-            try:
-                result = import_historical_movings(mov_file.read(), mov_file.name)
-                st.success(
-                    f"**Inserted:** {result['inserted']} · **Skipped:** {result['skipped']}"
-                )
-            except ValueError as exc:
-                st.error(str(exc))
 
 
 @st.cache_data(ttl=60)

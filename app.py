@@ -15,7 +15,6 @@ import streamlit as st
 from db.migration_runner import assert_schema_ready
 from services import property_service
 from ui.auth import require_auth, sign_out_current_user
-from ui.import_movings_page import render_import_movings
 from ui.screens.admin_page import render_admin_page
 from ui.screens.work_order_validator import render_work_order_validator
 
@@ -32,7 +31,7 @@ def _render_sidebar() -> str:
         st.markdown(
             "<h2 style='margin-top:-1rem;margin-bottom:0'>Work Order App</h2>"
             "<p style='margin:0 0 .5rem;font-size:.85rem;color:grey'>"
-            "Validator · Imports</p>",
+            "Validator · Units</p>",
             unsafe_allow_html=True,
         )
 
@@ -76,7 +75,7 @@ def _render_sidebar() -> str:
                         st.error(f"Failed to create property: {exc}")
 
         st.divider()
-        pages = ["Work Order Validator", "Import movings"]
+        pages = ["Work Order Validator", "Units"]
         if is_admin:
             pages.append("Admin")
         page = st.radio(
@@ -122,8 +121,8 @@ def main() -> None:
 
     if page == "Work Order Validator":
         render_work_order_validator()
-    elif page == "Import movings":
-        render_import_movings()
+    elif page == "Units":
+        render_units()
     else:
         render_admin_page()
 
