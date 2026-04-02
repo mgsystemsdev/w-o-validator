@@ -258,18 +258,18 @@ def render_report_page() -> None:
                     )
                 else:
                     st.caption(f"Last pending movings file processed: **{pfn}**")
-                if session_only:
-                    st.info(
-                        "Import completed, but no **snapshot row** was found in the database "
-                        "(often the `property_upload_snapshot` table is missing). "
-                        "Apply **`db/migrations/005_property_upload_snapshot.sql`** in the Supabase "
-                        "SQL Editor so results persist across sessions; move-in updates from this run "
-                        "may still have been saved."
-                    )
                 st.success(
                     f"**Processed:** {pm_res['processed']} · **Matched:** {pm_res['matched']} · "
                     f"**Unresolved:** {pm_res['unresolved']} · **Logged to movings:** {pm_res['logged']}"
                 )
+                if session_only:
+                    st.info(
+                        "**Move-in dates and moving-log rows from this run are already saved** in "
+                        "`unit_occupancy_global` and `unit_movings`. What is missing is only the optional "
+                        "**import summary** row (file name, counts on this page after logout). "
+                        "That needs the `property_upload_snapshot` table — run "
+                        "**`db/migrations/005_property_upload_snapshot.sql`** in the Supabase SQL Editor."
+                    )
                 if pm_res.get("processed", 0) > 0 and pm_res.get("matched", 0) == 0:
                     st.warning(
                         "**No units matched** this property’s unit master. "
