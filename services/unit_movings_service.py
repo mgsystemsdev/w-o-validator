@@ -13,7 +13,7 @@ from datetime import date
 
 import pandas as pd
 
-from db.repository import unit_movings_repository
+from db.repository import unit_movings_repository, unit_repository
 from domain.unit_identity import normalize_unit_code
 from services.pandas_dates import parse_one_date_cell
 
