@@ -16,6 +16,7 @@ from datetime import date
 
 import pandas as pd
 
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -76,10 +77,7 @@ def _build_col_map(df: pd.DataFrame, section_row: int) -> dict[str, int]:
 def _parse_date(value) -> date | None:
     if pd.isna(value):
         return None
-    try:
-        return pd.to_datetime(value).date()
-    except Exception:
-        return None
+    return parse_one_date_cell(value)
 
 
 def parse(file_content: bytes, filename: str = "resident_activity.xls") -> list[dict]:

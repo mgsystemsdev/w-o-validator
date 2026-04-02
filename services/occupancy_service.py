@@ -159,7 +159,7 @@ def ingest_pending_movings(
         )
 
     df = df[["unit_number", "move_in_date"]].dropna(subset=["unit_number"])
-    df["move_in_date"] = pd.to_datetime(df["move_in_date"], errors="coerce").dt.date
+    df["move_in_date"] = coerce_datetime_series(df["move_in_date"]).dt.date
 
     records: list[dict] = []
     for _, row in df.iterrows():

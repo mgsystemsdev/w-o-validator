@@ -24,6 +24,8 @@ from typing import Any
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
+
+from domain.dates import EXCEL_DATE_NUMBER_FORMAT
 from openpyxl.utils import get_column_letter
 
 # ---------------------------------------------------------------------------
@@ -62,7 +64,7 @@ _C_SECTION_IP   = "BDD7EE"   # light blue — IN PROGRESS section header
 _C_SECTION_OH   = "FCE4D6"   # light orange — ON HOLD section header
 _C_MR           = "C6EFCE"   # green — Make Ready
 _C_UNRESOLVED   = "D9D9D9"   # gray — Common Area
-_DATE_FMT       = "MM/DD/YY"
+_DATE_FMT       = EXCEL_DATE_NUMBER_FORMAT
 
 
 # ---------------------------------------------------------------------------

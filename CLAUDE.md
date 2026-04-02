@@ -72,6 +72,12 @@ Pure functions for unit code handling — safe to unit-test with no mocking:
 
 `occupancy_service.ingest()` accepts normalized `[{unit_number, move_in_date}]` records. Parsers (e.g., `parsers/resident_activity_parser.py`) transform source formats into this shape. Adding a new data source = add a parser; no service or repository changes needed.
 
+### Move-in data vs moving log vs SR preview
+
+- **`unit_occupancy_global`** — Property-scoped move-in dates (Resident Activity / `occupancy_service.ingest`). Drives WO classification and the **Move-In Data** preview tables on the Work Order Validator page.
+- **`unit_movings`** — Global append-only log (`unit_number` + `moving_date`) from historical/pending movings-style imports. It is **not** the source for the Move-In Data tables.
+- **Classified SR preview** — After **Generate Report**, `work_order_validator_service.rows_for_preview()` populates `st.session_state["wo_preview_rows"]` for the Service Requests / Download Reports tables. Session-only; not stored in the database.
+
 ### Work Order Classification Logic (`services/work_order_validator_service.py`)
 
 - `days_since_move_in = created_date - move_in_date`

@@ -33,7 +33,7 @@ def _render_sidebar() -> str:
         st.markdown(
             "<h2 style='margin-top:-1rem;margin-bottom:0'>Work Order App</h2>"
             "<p style='margin:0 0 .5rem;font-size:.85rem;color:grey'>"
-            "Validator · Units</p>",
+            "Validator · Report · Units</p>",
             unsafe_allow_html=True,
         )
 

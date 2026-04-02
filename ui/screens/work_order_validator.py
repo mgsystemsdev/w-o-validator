@@ -11,11 +11,33 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+from domain.dates import format_us_date
 from services import occupancy_service, work_order_validator_service
 from services import work_order_excel
 from services.report_operations import active_sr_report
 
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _dataframe_with_us_dates(rows: list[dict]) -> pd.DataFrame:
+    """Render move-in / occupancy tables with mm/dd/yyyy in Streamlit."""
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            df[col] = df[col].apply(
+                lambda x: format_us_date(x) if pd.notna(x) else ""
+            )
+        elif df[col].dtype == object:
+            df[col] = df[col].apply(
+                lambda x: (
+                    format_us_date(x)
+                    if isinstance(x, (date, pd.Timestamp))
+                    else ("" if x is None or (isinstance(x, float) and pd.isna(x)) else x)
+                )
+            )
+    return df
 
 _WO_STATE_KEYS = (
     "wo_report_bytes",
@@ -24,6 +46,7 @@ _WO_STATE_KEYS = (
     "wo_error",
     "wo_west_bytes",
     "wo_east_bytes",
+    "wo_preview_rows",
 )
 
 
@@ -116,10 +139,13 @@ def render_work_order_validator() -> None:
                         east_bytes = active_sr_report.build_active_sr_report_from_rows(rows, "EAST")
 
                         st.session_state.wo_report_bytes = report_bytes
-                        st.session_state.wo_report_date = date.today().isoformat()
+                        st.session_state.wo_report_date = format_us_date(date.today())
                         st.session_state.wo_summary = summary
                         st.session_state.wo_west_bytes = west_bytes
                         st.session_state.wo_east_bytes = east_bytes
+                        st.session_state.wo_preview_rows = work_order_validator_service.rows_for_preview(
+                            rows
+                        )
                         st.session_state.wo_error = None
                     except Exception as exc:  # noqa: BLE001
                         for k in _WO_STATE_KEYS:
@@ -138,6 +164,8 @@ def render_work_order_validator() -> None:
                     "When ready, open **Download Reports** for exports."
                 )
 
+        _render_wo_preview_section()
+
     with tab_download:
         with st.container(border=True):
             st.markdown("**DOWNLOAD REPORTS**")
@@ -150,6 +178,10 @@ def render_work_order_validator() -> None:
             report_date = st.session_state.get("wo_report_date")
             west_bytes = st.session_state.get("wo_west_bytes")
             east_bytes = st.session_state.get("wo_east_bytes")
+            # Slashes in mm/dd/yyyy break download paths — use hyphens in filenames only.
+            report_file_slug = (
+                report_date.replace("/", "-") if isinstance(report_date, str) else "report"
+            )
 
             if west_bytes and east_bytes and summary:
                 st.success(
@@ -160,12 +192,14 @@ def render_work_order_validator() -> None:
                 if report_date:
                     st.caption(f"Generated on: **{report_date}**")
 
+                _render_wo_preview_section()
+
                 c_east, c_west = st.columns(2)
                 with c_east:
                     st.download_button(
                         "Download East (Robert)",
                         data=east_bytes,
-                        file_name=f"ASR_East_Robert_{report_date or 'report'}.xlsx",
+                        file_name=f"ASR_East_Robert_{report_file_slug}.xlsx",
                         mime=_XLSX_MIME,
                         key="wo_download_east_robert",
                         width="stretch",
@@ -174,7 +208,7 @@ def render_work_order_validator() -> None:
                     st.download_button(
                         "Download West (Mabi)",
                         data=west_bytes,
-                        file_name=f"ASR_West_Mabi_{report_date or 'report'}.xlsx",
+                        file_name=f"ASR_West_Mabi_{report_file_slug}.xlsx",
                         mime=_XLSX_MIME,
                         key="wo_download_west_mabi",
                         width="stretch",
@@ -184,6 +218,29 @@ def render_work_order_validator() -> None:
                     "No report available yet. Use **Service Requests** to upload and "
                     "click **Generate Report**."
                 )
+                _render_wo_preview_section()
+
+
+def _render_wo_preview_section() -> None:
+    """Session-backed preview of the last successful SR classification (both SR + Download tabs)."""
+    preview = st.session_state.get("wo_preview_rows")
+
+    with st.container(border=True):
+        st.markdown("**CLASSIFIED WORK ORDERS (PREVIEW)**")
+        st.caption(
+            "Matches the latest generated report. East/West downloads split rows by phase inside "
+            "each file."
+        )
+        if preview:
+            st.caption(f"**{len(preview)}** work orders.")
+            st.dataframe(
+                pd.DataFrame(preview),
+                use_container_width=True,
+                hide_index=True,
+                height=400,
+            )
+        else:
+            st.caption("Generate a report from **Service Requests** to see a preview here.")
 
 
 def _render_move_in_tables(property_id: int) -> None:
@@ -198,7 +255,7 @@ def _render_move_in_tables(property_id: int) -> None:
         )
         if log_rows:
             st.dataframe(
-                pd.DataFrame(log_rows),
+                _dataframe_with_us_dates(log_rows),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -213,7 +270,7 @@ def _render_move_in_tables(property_id: int) -> None:
         )
         if units_with_move_in:
             st.dataframe(
-                pd.DataFrame(units_with_move_in),
+                _dataframe_with_us_dates(units_with_move_in),
                 use_container_width=True,
                 hide_index=True,
             )
@@ -229,7 +286,7 @@ def _render_occupancy_status(property_id: int) -> None:
         last_updated = status["last_updated"]
         if count and last_updated:
             st.caption(
-                f"Move-in data last updated: **{last_updated}** — "
+                f"Move-in data last updated: **{format_us_date(last_updated)}** — "
                 f"**{count}** units on file."
             )
         else:

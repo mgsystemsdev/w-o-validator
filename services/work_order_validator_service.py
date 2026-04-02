@@ -26,9 +26,11 @@ from datetime import date
 import pandas as pd
 
 from db.repository import unit_repository
+from domain.dates import format_us_date
 from domain.unit_identity import normalize_unit_code, parse_unit_parts
 from services import occupancy_service
 from services import work_order_excel
+from services.pandas_dates import coerce_datetime_series
 
 logger = logging.getLogger(__name__)
 
@@ -115,10 +117,9 @@ def validate(property_id: int, sr_file_content: bytes) -> list[dict]:
 
     df.columns = [str(c).strip() for c in df.columns]
 
-    if "Created date" in df.columns:
-        df["Created date"] = pd.to_datetime(
-            df["Created date"], format="%m/%d/%Y", errors="coerce"
-        )
+    for _date_col in ("Created date", "Due date"):
+        if _date_col in df.columns:
+            df[_date_col] = coerce_datetime_series(df[_date_col])
 
     occupancy: dict[int, date | None] = occupancy_service.get_all_occupancy(property_id)
 
@@ -193,3 +194,57 @@ def get_summary(rows: list[dict]) -> dict:
         "make_ready": make_ready,
         "service_tech": total - make_ready,
     }
+
+
+# (source_key, dataframe_column_label) — aligns with work_order_excel row keys where possible.
+_PREVIEW_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("Number", "Number"),
+    ("Location", "Location"),
+    ("Created date", "Created date"),
+    ("Due date", "Due date"),
+    ("Days open", "Days open"),
+    ("Service Category", "Service Category"),
+    ("Issue", "Issue"),
+    ("Assigned to", "Assigned to"),
+    ("Priority", "Priority"),
+    ("Status", "Status"),
+    ("ph", "PH"),
+    ("bld", "BLD"),
+    ("days_since_move_in", "Days since move-in"),
+    ("wo_classification", "WO Classification"),
+)
+
+
+def _preview_scalar(val: object) -> object:
+    """Normalize a cell for JSON-like / Streamlit-safe display."""
+    if val is None:
+        return None
+    if isinstance(val, float) and pd.isna(val):
+        return None
+    if isinstance(val, pd.Timestamp):
+        if pd.isna(val):
+            return None
+        return format_us_date(val)
+    if isinstance(val, date):
+        return format_us_date(val)
+    if isinstance(val, str):
+        return val
+    if isinstance(val, (int, bool)):
+        return val
+    if hasattr(val, "item"):
+        try:
+            return _preview_scalar(val.item())
+        except (ValueError, AttributeError, TypeError):
+            pass
+    return val
+
+
+def rows_for_preview(rows: list[dict]) -> list[dict]:
+    """Flatten validate() output for ``st.dataframe`` (stable columns, safe types)."""
+    result: list[dict] = []
+    for rec in rows:
+        out: dict[str, object] = {}
+        for src_key, label in _PREVIEW_COLUMNS:
+            out[label] = _preview_scalar(rec.get(src_key))
+        result.append(out)
+    return result
