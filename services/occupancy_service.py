@@ -126,7 +126,7 @@ def ingest_pending_movings(
     """Parse a Pending Movings file and update unit_occupancy_global + unit_movings.
 
     Expected columns: ``unit_number``, ``move_in_date`` (date-parseable string).
-    Both CSV and Excel (.xlsx) are accepted.
+    CSV (``.csv``) and Excel (``.xls`` / ``.xlsx``) are accepted.
 
     Each row:
       1. Upserts ``unit_occupancy_global`` via :func:`ingest` so the WO validator

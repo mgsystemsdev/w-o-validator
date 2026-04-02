@@ -121,8 +121,8 @@ def render_report_page() -> None:
             )
 
             pm_file = st.file_uploader(
-                "Pending movings export (.xls / .xlsx)",
-                type=["xls", "xlsx"],
+                "Pending movings export (.xls / .xlsx / .csv)",
+                type=["xls", "xlsx", "csv"],
                 key="report_pending_movings_upload",
             )
 
