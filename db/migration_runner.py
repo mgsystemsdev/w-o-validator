@@ -20,6 +20,7 @@ _REQUIRED_TABLES = [
     "unit_movings",
     "users",
     "user_properties",
+    "property_upload_snapshot",
 ]
 
 

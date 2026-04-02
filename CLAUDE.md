@@ -18,6 +18,7 @@ db/migrations/001_schema.sql
 db/migrations/002_unit_movings.sql
 db/migrations/003_unit_occupancy_global.sql
 db/migrations/004_users.sql
+db/migrations/005_property_upload_snapshot.sql
 ```
 
 Migration runner at startup is **read-only** (verifies tables exist, does not apply changes).

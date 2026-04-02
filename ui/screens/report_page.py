@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-
 import streamlit as st
 
+from db.repository import property_upload_snapshot_repository
+from domain.dates import format_us_datetime
 from services import occupancy_service, unit_movings_service
 from ui.dataframe_display import dataframe_for_streamlit
 
@@ -12,6 +13,19 @@ from ui.dataframe_display import dataframe_for_streamlit
 @st.cache_data(ttl=60)
 def _cached_property_moving_log_bundle(property_id: int) -> dict:
     return unit_movings_service.get_property_moving_log_bundle(property_id)
+
+
+def _load_moving_log_snapshot(property_id: int) -> dict | None:
+    row = property_upload_snapshot_repository.get(
+        property_id, property_upload_snapshot_repository.KIND_MOVING_LOG_IMPORT
+    )
+    return row
+
+
+def _load_pending_snapshot(property_id: int) -> dict | None:
+    return property_upload_snapshot_repository.get(
+        property_id, property_upload_snapshot_repository.KIND_PENDING_MOVINGS_IMPORT
+    )
 
 
 def render_report_page() -> None:
@@ -52,19 +66,27 @@ def render_report_page() -> None:
                             ml_file.getvalue(),
                             filename=ml_file.name,
                         )
-                        st.session_state.report_moving_log_result = result
+                        property_upload_snapshot_repository.upsert(
+                            property_id,
+                            property_upload_snapshot_repository.KIND_MOVING_LOG_IMPORT,
+                            {**result, "source_filename": ml_file.name},
+                        )
                         st.session_state.report_moving_log_error = None
                         _cached_property_moving_log_bundle.clear()
                     except Exception as exc:  # noqa: BLE001
-                        st.session_state.report_moving_log_result = None
                         st.session_state.report_moving_log_error = str(exc)
                 st.rerun()
 
             ml_err = st.session_state.get("report_moving_log_error")
-            ml_res = st.session_state.get("report_moving_log_result")
             if ml_err:
                 st.error(f"Import failed: {ml_err}")
-            if ml_res:
+
+            ml_row = _load_moving_log_snapshot(property_id)
+            if ml_row:
+                ml_res = ml_row["payload"]
+                ml_when = format_us_datetime(ml_row["updated_at"])
+                fn = ml_res.get("source_filename") or "—"
+                st.caption(f"Last moving log file processed: **{fn}** · **{ml_when}**")
                 ao = ml_res.get("already_on_file", 0)
                 ni = ml_res.get("not_imported", 0)
                 st.success(
@@ -168,29 +190,32 @@ def render_report_page() -> None:
             ):
                 with st.spinner("Loading pending movings…"):
                     try:
-                        result = occupancy_service.ingest_pending_movings(
+                        occupancy_service.ingest_pending_movings(
                             property_id,
                             pm_file.getvalue(),
                             filename=pm_file.name,
                         )
-                        st.session_state.report_pending_result = result
                         st.session_state.report_pending_error = None
                         st.cache_data.clear()
                     except Exception as exc:  # noqa: BLE001
-                        st.session_state.report_pending_result = None
                         st.session_state.report_pending_error = str(exc)
                 st.rerun()
 
             pm_err = st.session_state.get("report_pending_error")
-            pm_res = st.session_state.get("report_pending_result")
             if pm_err:
                 st.error(f"Import failed: {pm_err}")
-            if pm_res:
+
+            pm_row = _load_pending_snapshot(property_id)
+            if pm_row:
+                pm_res = pm_row["payload"]
+                pm_when = format_us_datetime(pm_row["updated_at"])
+                pfn = pm_res.get("source_filename") or "—"
+                st.caption(f"Last pending movings file processed: **{pfn}** · **{pm_when}**")
                 st.success(
                     f"**Processed:** {pm_res['processed']} · **Matched:** {pm_res['matched']} · "
                     f"**Unresolved:** {pm_res['unresolved']} · **Logged to movings:** {pm_res['logged']}"
                 )
                 st.info(
-                    "Move-in preview tables under **Work Order Validator → Move-In Data** were "
-                    "refreshed (cache cleared)."
+                    "Move-in preview tables under **Work Order Validator → Move-In Data** reflect "
+                    "this property’s occupancy store (cache was refreshed on last run)."
                 )

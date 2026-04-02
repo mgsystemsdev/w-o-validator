@@ -5,8 +5,16 @@ from __future__ import annotations
 from datetime import date, datetime
 
 US_DATE_DISPLAY_FMT = "%m/%d/%Y"
+US_DATETIME_DISPLAY_FMT = "%m/%d/%Y %I:%M %p"
 # openpyxl / Excel built-in number format (4-digit year)
 EXCEL_DATE_NUMBER_FORMAT = "MM/DD/YYYY"
+
+
+def format_us_datetime(value: datetime | None) -> str:
+    """Date and time for upload / audit lines (12-hour clock, US date)."""
+    if value is None:
+        return ""
+    return value.strftime(US_DATETIME_DISPLAY_FMT)
 
 
 def format_us_date(value: date | datetime | None) -> str:

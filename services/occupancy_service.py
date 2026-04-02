@@ -19,7 +19,12 @@ import io
 
 import pandas as pd
 
-from db.repository import occupancy_repository, unit_repository, unit_movings_repository
+from db.repository import (
+    occupancy_repository,
+    property_upload_snapshot_repository,
+    unit_movings_repository,
+    unit_repository,
+)
 from domain.unit_identity import normalize_unit_code
 from services.pandas_dates import coerce_datetime_series
 from services.parsers import resident_activity_parser
@@ -115,7 +120,16 @@ def ingest_resident_activity(
         "occupancy_service.ingest_resident_activity: %d raw records → %d after de-duplication",
         len(raw_records), len(clean_records),
     )
-    return ingest(property_id, clean_records)
+    result = ingest(property_id, clean_records)
+    try:
+        property_upload_snapshot_repository.upsert(
+            property_id,
+            property_upload_snapshot_repository.KIND_RESIDENT_ACTIVITY_INGEST,
+            {**result, "source_filename": filename},
+        )
+    except Exception:
+        logger.exception("occupancy_service: could not persist resident activity snapshot")
+    return result
 
 
 def ingest_pending_movings(
@@ -193,7 +207,16 @@ def ingest_pending_movings(
         "matched=%d unresolved=%d logged=%d",
         property_id, result["processed"], result["matched"], result["unresolved"], logged,
     )
-    return {**result, "logged": logged}
+    out = {**result, "logged": logged}
+    try:
+        property_upload_snapshot_repository.upsert(
+            property_id,
+            property_upload_snapshot_repository.KIND_PENDING_MOVINGS_IMPORT,
+            {**out, "source_filename": filename},
+        )
+    except Exception:
+        logger.exception("occupancy_service: could not persist pending movings snapshot")
+    return out
 
 
 def get_all_occupancy(property_id: int) -> dict[int, date | None]:
@@ -205,11 +228,13 @@ def get_occupancy_status(property_id: int) -> dict:
     """Return summary info for the UI status display.
 
     Returns:
-        {"unit_count": int, "last_updated": date | None}
+        {"unit_count": int, "last_updated": date | None, "last_updated_at": datetime | None}
     """
+
     return {
         "unit_count": occupancy_repository.count_by_property(property_id),
         "last_updated": occupancy_repository.get_last_updated(property_id),
+        "last_updated_at": occupancy_repository.get_last_updated_at(property_id),
     }
 
 

@@ -53,6 +53,19 @@ def _run_unit_master_import(property_id: int) -> None:
         return
     strict = st.session_state.get("wo_um_strict", False)
     result = unit_service.import_unit_master(property_id, df, strict)
+    try:
+        property_upload_snapshot_repository.upsert(
+            property_id,
+            property_upload_snapshot_repository.KIND_UNIT_MASTER_IMPORT,
+            {
+                "created": result["created"],
+                "skipped": result["skipped"],
+                "errors_count": len(result["errors"]),
+                "source_filename": getattr(uploaded, "name", "Units.csv"),
+            },
+        )
+    except Exception:
+        pass
     created = result["created"]
     skipped = result["skipped"]
     errors = result["errors"]
@@ -85,10 +98,21 @@ def render_units() -> None:
 
     with st.container(border=True):
         st.markdown("**UNIT MASTER IMPORT**")
-        st.caption(
+        _um_snap = property_upload_snapshot_repository.get(
+            property_id, property_upload_snapshot_repository.KIND_UNIT_MASTER_IMPORT
+        )
+        _um_help = (
             "Load **Units.csv** so Service Request **Location** values resolve to units. "
             "Required column: `unit_code`. Optional: `phase`, `building`, `Floor Plan`, `Gross Sq. Ft.`"
         )
+        if _um_snap:
+            _ufn = _um_snap["payload"].get("source_filename") or "—"
+            st.caption(
+                f"Last unit master file: **{_ufn}** · **{format_us_datetime(_um_snap['updated_at'])}**. "
+                + _um_help
+            )
+        else:
+            st.caption(_um_help)
         uc1, uc2, uc3 = st.columns([1, 2, 1])
         with uc1:
             st.checkbox(

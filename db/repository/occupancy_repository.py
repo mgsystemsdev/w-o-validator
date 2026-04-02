@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from psycopg2.extras import RealDictCursor
 
@@ -52,6 +52,12 @@ def count_by_property(property_id: int) -> int:
 
 
 def get_last_updated(property_id: int) -> date | None:
+    dt = get_last_updated_at(property_id)
+    return dt.date() if dt else None
+
+
+def get_last_updated_at(property_id: int) -> datetime | None:
+    """Latest ``updated_at`` on occupancy rows for this property (includes time)."""
     conn = get_connection()
     with conn.cursor() as cur:
         cur.execute(
@@ -59,7 +65,14 @@ def get_last_updated(property_id: int) -> date | None:
             (property_id,),
         )
         result = cur.fetchone()[0]
-        return result.date() if result else None
+    if result is None:
+        return None
+    if isinstance(result, datetime):
+        return result
+    # Some drivers may return date for a timestamp column
+    if isinstance(result, date):
+        return datetime.combine(result, datetime.min.time())
+    return None
 
 
 def list_move_in_rows_for_property(property_id: int) -> list[dict]:
