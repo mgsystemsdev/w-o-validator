@@ -10,8 +10,8 @@ from ui.dataframe_display import dataframe_for_streamlit
 
 
 @st.cache_data(ttl=60)
-def _cached_property_moving_log(property_id: int) -> list[dict]:
-    return unit_movings_service.get_property_moving_log_rows(property_id)
+def _cached_property_moving_log_bundle(property_id: int) -> dict:
+    return unit_movings_service.get_property_moving_log_bundle(property_id)
 
 
 def render_report_page() -> None:
@@ -54,7 +54,7 @@ def render_report_page() -> None:
                         )
                         st.session_state.report_moving_log_result = result
                         st.session_state.report_moving_log_error = None
-                        _cached_property_moving_log.clear()
+                        _cached_property_moving_log_bundle.clear()
                     except Exception as exc:  # noqa: BLE001
                         st.session_state.report_moving_log_result = None
                         st.session_state.report_moving_log_error = str(exc)
@@ -65,17 +65,26 @@ def render_report_page() -> None:
             if ml_err:
                 st.error(f"Import failed: {ml_err}")
             if ml_res:
+                ao = ml_res.get("already_on_file", 0)
+                ni = ml_res.get("not_imported", 0)
                 st.success(
-                    f"**Inserted:** {ml_res['inserted']} · **Skipped:** {ml_res['skipped']} "
-                    "(duplicates or invalid rows count as skipped)."
+                    f"**New records added:** {ml_res['inserted']} · "
+                    f"**Already on file (official date unchanged):** {ao} · "
+                    f"**Not imported:** {ni}"
+                )
+                st.caption(
+                    "Rows that are only spreadsheet titles or KPI lines (e.g. packet summaries) "
+                    "are ignored and do not appear in the table below."
                 )
                 row_results = ml_res.get("row_results") or []
                 if row_results:
                     with st.container(border=True):
                         st.markdown("**LAST IMPORT — ROW BY ROW**")
                         st.caption(
-                            "Parsed from your file: unit, moving date (when recognized), and outcome. "
-                            "Fix source data or remove duplicates, then re-import if needed."
+                            "Each data row from your file: unit, moving date, and outcome. "
+                            "**Already registered** means the system already had this move-in date on file — "
+                            "it is retained as the official moving date for that unit. "
+                            "Use **Not imported** rows to fix source data and re-import if needed."
                         )
                         _pm = dataframe_for_streamlit(row_results)
                         if not _pm.empty:
@@ -101,19 +110,39 @@ def render_report_page() -> None:
                 "if this list is empty after a successful import, those codes may not match "
                 "any row in the unit master for the selected property. Newest first."
             )
-            log_table = _cached_property_moving_log(property_id)
-            if log_table:
+            bundle = _cached_property_moving_log_bundle(property_id)
+            log_table = bundle["rows"]
+            if bundle["unit_count"] == 0:
+                st.warning(
+                    "This property has **no unit roster** (no rows on the **Units** / unit master "
+                    "for this property). Moving log lines are matched to that roster — import units "
+                    "first, then entries will appear here."
+                )
+            elif bundle["norm_key_count"] == 0:
+                st.warning(
+                    "Units exist but no usable **unit codes** were found (empty "
+                    "``unit_code_raw`` / ``unit_code_norm``)."
+                )
+            elif log_table:
+                _df = dataframe_for_streamlit(log_table)
+                if not _df.empty:
+                    _df = _df.rename(
+                        columns={
+                            "unit": "Unit",
+                            "moving_date": "Moving date",
+                            "logged_at": "Logged at",
+                        }
+                    )
                 st.dataframe(
-                    dataframe_for_streamlit(log_table),
+                    _df,
                     use_container_width=True,
                     hide_index=True,
-                    height=400,
                 )
             else:
                 st.caption(
                     "No matching rows yet — load a moving log above (see **LAST IMPORT** for what "
                     "was read), use **Pending Movings**, or confirm imported **Units** include the "
-                    "same unit codes as the file."
+                    "same unit codes as the file (after normalization)."
                 )
 
     with tab_pending:

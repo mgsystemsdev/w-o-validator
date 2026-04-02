@@ -179,6 +179,35 @@ def normalize_moving_unit_key(raw: str | None) -> str:
     return normalize_unit_code(str(raw))
 
 
+# Rows where a KPI / title string was parsed into the unit column (ignore entirely).
+_SUMMARY_UNIT_SUBSTRINGS: tuple[str, ...] = (
+    "packets submitted",
+    "packets pending",
+    "packets approved",
+    "total packets",
+    "move ins for week",
+    "move in pending",
+    "pending approval",
+    "submitted for current week",
+    "approved / move in",
+    "approved this week",
+    "from previous weeks",
+)
+
+
+def _is_summary_or_title_row(unit_str: str) -> bool:
+    """True when the cell is sheet chrome (headers, totals), not a unit code row."""
+    u = (unit_str or "").strip().lower()
+    if not u:
+        return False
+    if any(s in u for s in _SUMMARY_UNIT_SUBSTRINGS):
+        return True
+    # Long prose in the unit column (typical codes are short; KPI lines are sentences).
+    if len(u) > 48 and u.count(" ") >= 3:
+        return True
+    return False
+
+
 def import_historical_movings(file_content: bytes, filename: str) -> dict:
     """Import historical movings from an uploaded spreadsheet.
 
@@ -188,7 +217,9 @@ def import_historical_movings(file_content: bytes, filename: str) -> dict:
     Excel files with title rows above the real header are detected automatically
     (first row with recognizable **unit** and **date** column headers).
 
-    Returns {"inserted": int, "skipped": int}.
+    Returns:
+        ``inserted``, ``already_on_file``, ``not_imported``, ``skipped`` (latter two sum),
+        and ``row_results`` (data rows only — no sheet title lines).
     """
     ext = filename.rsplit(".", 1)[-1].lower()
     try:
@@ -206,21 +237,26 @@ def import_historical_movings(file_content: bytes, filename: str) -> dict:
         )
 
     inserted = 0
-    skipped = 0
+    already_on_file = 0
+    not_imported = 0
     row_results: list[dict] = []
 
     for _, row in df.iterrows():
         raw_unit = row.get("unit_number", "")
         unit_str = "" if raw_unit is None or (isinstance(raw_unit, float) and pd.isna(raw_unit)) else str(raw_unit).strip()
+        raw_date = row.get("moving_date")
+
+        if _is_summary_or_title_row(unit_str):
+            continue
+
         unit_number = normalize_moving_unit_key(raw_unit if unit_str else "")
 
-        raw_date = row.get("moving_date")
         status = ""
         parsed_date: date | None = None
 
         if not unit_number:
-            skipped += 1
-            status = "Skipped — empty or unparseable unit"
+            not_imported += 1
+            status = "Not imported — unit code is missing or could not be read."
             row_results.append(
                 {"unit": unit_str or "(blank)", "moving_date": None, "status": status}
             )
@@ -229,8 +265,8 @@ def import_historical_movings(file_content: bytes, filename: str) -> dict:
         if pd.isna(raw_date) or (
             isinstance(raw_date, str) and not str(raw_date).strip()
         ):
-            skipped += 1
-            status = "Skipped — missing date"
+            not_imported += 1
+            status = "Not imported — moving date is missing in this row."
             row_results.append(
                 {"unit": unit_str, "moving_date": None, "status": status}
             )
@@ -238,8 +274,8 @@ def import_historical_movings(file_content: bytes, filename: str) -> dict:
 
         moving_date = parse_one_date_cell(raw_date)
         if moving_date is None:
-            skipped += 1
-            status = "Skipped — date not recognized (check Excel / format)"
+            not_imported += 1
+            status = "Not imported — moving date could not be read from the file."
             row_results.append(
                 {"unit": unit_str, "moving_date": None, "status": status}
             )
@@ -249,16 +285,29 @@ def import_historical_movings(file_content: bytes, filename: str) -> dict:
         result = unit_movings_repository.insert_moving(unit_number, moving_date)
         if result is not None:
             inserted += 1
-            status = "Inserted"
+            status = (
+                "Recorded — this move-in date is now in the moving log and will be used "
+                "as the official date for this unit."
+            )
         else:
-            skipped += 1
-            status = "Skipped — duplicate (same unit + date already in log)"
+            already_on_file += 1
+            status = (
+                "Already registered — this unit and move-in date are already on file; "
+                "that date remains the official moving date for this unit."
+            )
 
         row_results.append(
             {"unit": unit_str, "moving_date": parsed_date, "status": status}
         )
 
-    return {"inserted": inserted, "skipped": skipped, "row_results": row_results}
+    skipped = already_on_file + not_imported
+    return {
+        "inserted": inserted,
+        "skipped": skipped,
+        "already_on_file": already_on_file,
+        "not_imported": not_imported,
+        "row_results": row_results,
+    }
 
 
 def get_latest_movings_lookup() -> dict[str, date]:
@@ -294,24 +343,8 @@ def _norm_keys_and_candidates(units: list[dict]) -> tuple[set[str], list[str]]:
     return norm_keys, list(candidates)
 
 
-def get_property_moving_log_rows(property_id: int) -> list[dict]:
-    """Rows from ``unit_movings`` that match units on this property (newest dates first).
-
-    Each dict: ``unit`` (display code), ``moving_date``, ``logged_at``.
-    """
-    units = unit_repository.get_by_property(property_id, active_only=False)
-    if not units:
-        return []
-
-    norm_keys, candidates = _norm_keys_and_candidates(units)
-    raw_movings = unit_movings_repository.list_movings_for_unit_numbers(candidates)
-    movings = [
-        m
-        for m in raw_movings
-        if normalize_moving_unit_key(m["unit_number"]) in norm_keys
-    ]
-    movings.sort(key=lambda m: (m["moving_date"], m["unit_number"]), reverse=True)
-
+def _moving_log_rows_for_units(units: list[dict], movings: list[dict]) -> list[dict]:
+    """Map matched ``movings`` rows to display dicts using the property roster."""
     norm_to_display: dict[str, str] = {}
     for u in units:
         disp = (u.get("unit_code_raw") or u.get("unit_code_norm") or "").strip()
@@ -334,3 +367,47 @@ def get_property_moving_log_rows(property_id: int) -> list[dict]:
             }
         )
     return rows
+
+
+def get_property_moving_log_bundle(property_id: int) -> dict:
+    """Moving log rows for the property plus roster context for the UI.
+
+    Returns:
+        ``rows``: newest-first entries from ``unit_movings`` whose normalized unit
+        matches a unit on this property.
+        ``unit_count``: number of units on the property (including inactive).
+        ``norm_key_count``: roster codes that normalize to a non-empty key (0 if
+        the roster has no usable unit codes).
+    """
+    units = unit_repository.get_by_property(property_id, active_only=False)
+    unit_count = len(units)
+    if not units:
+        return {"rows": [], "unit_count": 0, "norm_key_count": 0}
+
+    norm_keys, _ = _norm_keys_and_candidates(units)
+    norm_key_count = len(norm_keys)
+    if not norm_keys:
+        return {"rows": [], "unit_count": unit_count, "norm_key_count": 0}
+
+    # Match on normalized identity so DB strings need not exactly match roster strings.
+    all_movings = unit_movings_repository.list_all_movings()
+    movings = [
+        m
+        for m in all_movings
+        if normalize_moving_unit_key(m["unit_number"]) in norm_keys
+    ]
+    movings.sort(key=lambda m: (m["moving_date"], m["unit_number"]), reverse=True)
+    rows = _moving_log_rows_for_units(units, movings)
+    return {
+        "rows": rows,
+        "unit_count": unit_count,
+        "norm_key_count": norm_key_count,
+    }
+
+
+def get_property_moving_log_rows(property_id: int) -> list[dict]:
+    """Rows from ``unit_movings`` that match units on this property (newest dates first).
+
+    Each dict: ``unit`` (display code), ``moving_date``, ``logged_at``.
+    """
+    return get_property_moving_log_bundle(property_id)["rows"]

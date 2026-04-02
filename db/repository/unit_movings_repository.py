@@ -57,3 +57,21 @@ def list_movings_for_unit_numbers(unit_numbers: list[str] | tuple[str, ...]) -> 
             (list(unit_numbers),),
         )
         return cur.fetchall()
+
+
+def list_all_movings() -> list[dict]:
+    """All moving rows (global log), newest dates first.
+
+    Used to match rows to a property by normalizing ``unit_number`` in Python,
+    so legacy or spreadsheet variants still align with the unit roster.
+    """
+    conn = get_connection()
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT id, unit_number, moving_date, created_at
+            FROM unit_movings
+            ORDER BY moving_date DESC, unit_number ASC
+            """
+        )
+        return cur.fetchall()
