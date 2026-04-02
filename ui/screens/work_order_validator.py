@@ -1,7 +1,8 @@
 """Work Order Validator screen.
 
 Tabs: Move-In Data → Service Requests → Download Reports.
-Resident Activity upload feeds unit_occupancy_global; Service Request upload classifies WOs.
+Resident Activity (wide MOVE-INS report) upload feeds unit_occupancy_global; Pending Move Ins
+uses **Report → Pending Movings**. Service Request upload classifies WOs.
 """
 
 from __future__ import annotations
@@ -65,8 +66,11 @@ def render_work_order_validator() -> None:
         with st.container(border=True):
             st.markdown("**LOAD MOVE-IN DATA**")
             st.caption(
-                "Upload a Resident Activity export from OneSite to load move-in dates. "
-                "Required before generating the first report; re-upload whenever data is stale."
+                "This uploader expects the **Resident Activity** workbook from OneSite "
+                "(wide report with **MOVE-INS** sections). It does **not** parse **Pending Move Ins** "
+                "— for that export (Unit + Move-In Date, often with title rows), use "
+                "**Report → Pending Movings**. Load move-ins before the first WO report; "
+                "re-upload when data is stale."
             )
 
             _render_occupancy_status(property_id)

@@ -179,9 +179,12 @@ def render_report_page() -> None:
         with st.container(border=True):
             st.markdown("**PENDING MOVINGS**")
             st.caption(
-                "Upload a Pending Movings export with **unit_number** and **move_in_date** "
-                "(or **moving_date**). Updates **unit_occupancy_global** for this property and "
-                "appends matching rows to **unit_movings**."
+                "OneSite **Pending Move Ins** / pending movings export: table with **Unit** and "
+                "**Move-In Date** (``.csv`` / ``.xls`` / ``.xlsx``). Title rows above the header "
+                "row are detected automatically for Excel. Same data can use column names "
+                "**unit_number** and **move_in_date** (or **moving_date**). Updates "
+                "**unit_occupancy_global** for this property and appends matching rows to "
+                "**unit_movings**."
             )
 
             pm_file = st.file_uploader(

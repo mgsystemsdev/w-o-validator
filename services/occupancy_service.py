@@ -168,11 +168,55 @@ def _read_pending_movings_csv(file_content: bytes) -> pd.DataFrame:
     )
 
 
+def _pending_excel_engine(filename: str) -> str | None:
+    """Use xlrd for legacy ``.xls`` (same as Resident Activity / moving log readers)."""
+    return "xlrd" if filename.lower().endswith(".xls") else None
+
+
 def _read_pending_movings_dataframe(file_content: bytes, filename: str) -> pd.DataFrame:
+    """Load Pending Move Ins / pending movings spreadsheets and CSV.
+
+    Excel exports often have title rows (property name, as-of date) above the real
+    header. When row 0 is not ``Unit`` + ``Move-In Date``, we scan like the moving
+    log import (``_detect_unit_and_date_columns``).
+    """
     ext = filename.rsplit(".", 1)[-1].lower()
     if ext in ("xls", "xlsx"):
-        df = pd.read_excel(io.BytesIO(file_content), dtype=str)
-        return _pending_normalize_columns(df)
+        engine = _pending_excel_engine(filename)
+        buf = io.BytesIO(file_content)
+        df_try = pd.read_excel(buf, dtype=str, engine=engine)
+        df_try.columns = [_normalize_header_label(c) for c in df_try.columns]
+        broken = all(
+            _normalize_header_label(c).startswith("unnamed") or not str(c).strip()
+            for c in df_try.columns
+        )
+        if not broken:
+            df_norm = _pending_normalize_columns(df_try)
+            if "unit_number" in df_norm.columns and "move_in_date" in df_norm.columns:
+                return df_norm
+
+        raw = pd.read_excel(
+            io.BytesIO(file_content), header=None, dtype=str, engine=engine
+        )
+        det = _detect_unit_and_date_columns(raw)
+        if det is None:
+            raise ValueError(
+                "Could not find a header row with unit and move-in date columns. "
+                "Use the OneSite **Pending Move Ins** / pending movings export "
+                "(columns like Unit and Move-In Date), or CSV with those headers."
+            )
+        hr, uc, dc = det
+        logger.info(
+            "occupancy_service._read_pending_movings_dataframe: excel header row %s, "
+            "unit col %s, date col %s",
+            hr,
+            uc,
+            dc,
+        )
+        return _dataframe_from_detected_columns(raw, hr, uc, dc).rename(
+            columns={"moving_date": "move_in_date"}
+        )
+
     return _read_pending_movings_csv(file_content)
 
 
