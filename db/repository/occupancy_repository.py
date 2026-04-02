@@ -60,3 +60,24 @@ def get_last_updated(property_id: int) -> date | None:
         )
         result = cur.fetchone()[0]
         return result.date() if result else None
+
+
+def list_move_in_rows_for_property(property_id: int) -> list[dict]:
+    """Occupancy rows joined to unit for Move-In Data tables (property-scoped)."""
+    conn = get_connection()
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT
+                u.unit_code_raw AS unit,
+                o.move_in_date,
+                o.updated_at AS record_updated_at
+            FROM unit_occupancy_global o
+            JOIN unit u
+              ON u.property_id = o.property_id AND u.unit_id = o.unit_id
+            WHERE o.property_id = %s
+            ORDER BY u.unit_code_raw
+            """,
+            (property_id,),
+        )
+        return cur.fetchall()

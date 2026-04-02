@@ -210,3 +210,43 @@ def get_occupancy_status(property_id: int) -> dict:
         "unit_count": occupancy_repository.count_by_property(property_id),
         "last_updated": occupancy_repository.get_last_updated(property_id),
     }
+
+
+def get_move_in_tables_bundle(property_id: int) -> tuple[list[dict], list[dict]]:
+    """Data for Move-In Data tab tables: loaded occupancy + units overlay.
+
+    Reads ``unit_occupancy_global`` (same store as Resident Activity upload), not
+    ``unit_movings``.
+
+    Returns:
+        (log_rows, units_with_move_in) — log_rows have unit, move_in_date,
+        record_updated_at; second list matches **Imported Units** columns plus move_in_date.
+    """
+    raw_rows = occupancy_repository.list_move_in_rows_for_property(property_id)
+    log_rows = [
+        {
+            "unit": r["unit"],
+            "move_in_date": r["move_in_date"],
+            "record_updated_at": r["record_updated_at"],
+        }
+        for r in raw_rows
+    ]
+
+    by_unit_norm: dict[str, date | None] = {}
+    for r in raw_rows:
+        nk = normalize_unit_code(str(r["unit"] or ""))
+        if nk:
+            by_unit_norm[nk] = r["move_in_date"]
+
+    import_rows = unit_repository.list_unit_master_import_units(property_id)
+    units_out: list[dict] = []
+    for row in import_rows:
+        nk = normalize_unit_code(str(row.get("unit_code_raw") or "").strip())
+        units_out.append(
+            {
+                **row,
+                "move_in_date": by_unit_norm.get(nk),
+            }
+        )
+
+    return log_rows, units_out

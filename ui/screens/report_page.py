@@ -20,7 +20,7 @@ def render_report_page() -> None:
             st.markdown("**MOVING LOG**")
             st.caption(
                 "View or import moving history for this property. "
-                "Moving log tables live under **Work Order Validator → Move-In Data**."
+                "Move-in data tables live under **Work Order Validator → Move-In Data**."
             )
 
             st.file_uploader(
@@ -38,7 +38,7 @@ def render_report_page() -> None:
             )
 
             st.info(
-                "Loaded moving data and units-with-dates tables are on the **Move-In Data** tab."
+                "Loaded move-in rows and units-with-dates tables are on the **Move-In Data** tab."
             )
 
     with tab_pending:

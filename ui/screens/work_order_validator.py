@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 
+import pandas as pd
 import streamlit as st
 
 from services import occupancy_service, work_order_validator_service
@@ -27,8 +28,8 @@ _WO_STATE_KEYS = (
 
 
 @st.cache_data(ttl=60)
-def _cached_moving_log_bundle(property_id: int) -> tuple[list[dict], list[dict]]:
-    return unit_movings_service.get_property_moving_log_bundle(property_id)
+def _cached_move_in_tables(property_id: int) -> tuple[list[dict], list[dict]]:
+    return occupancy_service.get_move_in_tables_bundle(property_id)
 
 
 def render_work_order_validator() -> None:
@@ -69,6 +70,7 @@ def render_work_order_validator() -> None:
                         )
                         st.session_state.ra_ingest_result = result
                         st.session_state.ra_ingest_error = None
+                        _cached_move_in_tables.clear()
                     except Exception as exc:  # noqa: BLE001
                         st.session_state.ra_ingest_result = None
                         st.session_state.ra_ingest_error = str(exc)
@@ -86,7 +88,7 @@ def render_work_order_validator() -> None:
             if ra_error:
                 st.error(f"Failed to parse file: {ra_error}")
 
-        _render_moving_log_tables(property_id)
+        _render_move_in_tables(property_id)
 
     with tab_sr:
         with st.container(border=True):
@@ -184,15 +186,15 @@ def render_work_order_validator() -> None:
                 )
 
 
-def _render_moving_log_tables(property_id: int) -> None:
-    """Show unit_movings log + units overlay (same style as Units → Imported Units)."""
-    log_rows, units_with_movings = _cached_moving_log_bundle(property_id)
+def _render_move_in_tables(property_id: int) -> None:
+    """Show move-in data from ``unit_occupancy_global`` (Resident Activity load)."""
+    log_rows, units_with_move_in = _cached_move_in_tables(property_id)
 
     with st.container(border=True):
-        st.markdown("**LOADED MOVING DATA**")
+        st.markdown("**LOADED MOVE-IN DATA**")
         st.caption(
-            "Moving log entries from the database that match units on this property "
-            "(historical / pending movings imports)."
+            "Rows currently stored for this property from **Load Move-In Data** "
+            "(`unit_occupancy_global`)."
         )
         if log_rows:
             st.dataframe(
@@ -201,17 +203,17 @@ def _render_moving_log_tables(property_id: int) -> None:
                 hide_index=True,
             )
         else:
-            st.caption("No moving log rows matched to this property’s units yet.")
+            st.caption("No move-in rows on file yet — upload Resident Activity above.")
 
     with st.container(border=True):
-        st.markdown("**UNITS WITH MOVING DATES**")
+        st.markdown("**UNITS WITH MOVE-IN DATES**")
         st.caption(
-            "Imported units for this property with all matching moving dates "
-            "(same columns as **Imported Units** on the Units page, plus moving dates)."
+            "Imported units (same columns as **Imported Units** on the Units page) "
+            "with the loaded **move_in_date** when present."
         )
-        if units_with_movings:
+        if units_with_move_in:
             st.dataframe(
-                pd.DataFrame(units_with_movings),
+                pd.DataFrame(units_with_move_in),
                 use_container_width=True,
                 hide_index=True,
             )
