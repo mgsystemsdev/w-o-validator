@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime
 from typing import Any
 
 from psycopg2.extras import RealDictCursor
 
 from db.connection import get_connection
+
+logger = logging.getLogger(__name__)
+
+_SNAPSHOT_MIGRATION = "db/migrations/005_property_upload_snapshot.sql"
 
 KIND_MOVING_LOG_IMPORT = "moving_log_import"
 KIND_PENDING_MOVINGS_IMPORT = "pending_movings_import"
@@ -33,37 +38,55 @@ def upsert(
 ) -> None:
     raw = json.dumps(payload, default=_json_default)
     conn = get_connection()
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO property_upload_snapshot (
-                property_id, snapshot_kind, payload, blob_west, blob_east, updated_at
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO property_upload_snapshot (
+                    property_id, snapshot_kind, payload, blob_west, blob_east, updated_at
+                )
+                VALUES (%s, %s, %s::jsonb, %s, %s, NOW())
+                ON CONFLICT (property_id, snapshot_kind)
+                DO UPDATE SET
+                    payload    = EXCLUDED.payload,
+                    blob_west  = EXCLUDED.blob_west,
+                    blob_east  = EXCLUDED.blob_east,
+                    updated_at = NOW()
+                """,
+                (property_id, snapshot_kind, raw, blob_west, blob_east),
             )
-            VALUES (%s, %s, %s::jsonb, %s, %s, NOW())
-            ON CONFLICT (property_id, snapshot_kind)
-            DO UPDATE SET
-                payload    = EXCLUDED.payload,
-                blob_west  = EXCLUDED.blob_west,
-                blob_east  = EXCLUDED.blob_east,
-                updated_at = NOW()
-            """,
-            (property_id, snapshot_kind, raw, blob_west, blob_east),
+    except pg_errors.UndefinedTable:
+        conn.rollback()
+        logger.warning(
+            "Table property_upload_snapshot is missing; snapshots are skipped. "
+            "Apply %s in Supabase SQL Editor.",
+            _SNAPSHOT_MIGRATION,
         )
+        return
 
 
 def get(property_id: int, snapshot_kind: str) -> dict[str, Any] | None:
     """Return row dict with ``payload``, ``updated_at``, optional ``blob_*``; or None."""
     conn = get_connection()
-    with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute(
-            """
-            SELECT payload, updated_at, blob_west, blob_east
-            FROM property_upload_snapshot
-            WHERE property_id = %s AND snapshot_kind = %s
-            """,
-            (property_id, snapshot_kind),
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT payload, updated_at, blob_west, blob_east
+                FROM property_upload_snapshot
+                WHERE property_id = %s AND snapshot_kind = %s
+                """,
+                (property_id, snapshot_kind),
+            )
+            row = cur.fetchone()
+    except pg_errors.UndefinedTable:
+        conn.rollback()
+        logger.warning(
+            "Table property_upload_snapshot is missing; snapshot reads return empty. "
+            "Apply %s in Supabase SQL Editor.",
+            _SNAPSHOT_MIGRATION,
         )
-        row = cur.fetchone()
+        return None
     if not row:
         return None
     out: dict[str, Any] = {
