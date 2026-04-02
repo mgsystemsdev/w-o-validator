@@ -26,6 +26,11 @@ _WO_STATE_KEYS = (
 )
 
 
+@st.cache_data(ttl=60)
+def _cached_moving_log_bundle(property_id: int) -> tuple[list[dict], list[dict]]:
+    return unit_movings_service.get_property_moving_log_bundle(property_id)
+
+
 def render_work_order_validator() -> None:
     st.title("Work Order Validator")
 
@@ -80,6 +85,8 @@ def render_work_order_validator() -> None:
                 )
             if ra_error:
                 st.error(f"Failed to parse file: {ra_error}")
+
+        _render_moving_log_tables(property_id)
 
     with tab_sr:
         with st.container(border=True):
@@ -175,6 +182,41 @@ def render_work_order_validator() -> None:
                     "No report available yet. Use **Service Requests** to upload and "
                     "click **Generate Report**."
                 )
+
+
+def _render_moving_log_tables(property_id: int) -> None:
+    """Show unit_movings log + units overlay (same style as Units → Imported Units)."""
+    log_rows, units_with_movings = _cached_moving_log_bundle(property_id)
+
+    with st.container(border=True):
+        st.markdown("**LOADED MOVING DATA**")
+        st.caption(
+            "Moving log entries from the database that match units on this property "
+            "(historical / pending movings imports)."
+        )
+        if log_rows:
+            st.dataframe(
+                pd.DataFrame(log_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption("No moving log rows matched to this property’s units yet.")
+
+    with st.container(border=True):
+        st.markdown("**UNITS WITH MOVING DATES**")
+        st.caption(
+            "Imported units for this property with all matching moving dates "
+            "(same columns as **Imported Units** on the Units page, plus moving dates)."
+        )
+        if units_with_movings:
+            st.dataframe(
+                pd.DataFrame(units_with_movings),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption("No imported units yet — import a unit master on the Units page first.")
 
 
 def _render_occupancy_status(property_id: int) -> None:

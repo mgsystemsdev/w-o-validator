@@ -13,7 +13,7 @@ from datetime import date
 
 import pandas as pd
 
-from db.repository import unit_movings_repository
+from db.repository import unit_movings_repository, unit_repository
 from domain.unit_identity import normalize_unit_code
 
 logger = logging.getLogger(__name__)
