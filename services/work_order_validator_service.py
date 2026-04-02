@@ -1,13 +1,20 @@
 """Work Order Validator service.
 
 Classifies active service request work orders as "Make Ready" or
-"Service Technician" based on each unit's move-in date.
+"Service Technician" based on move-in timing and SR text fields.
 
-Classification rule:
-    days_since_move_in = created_date - move_in_date
+Classification rules — a row is **Make Ready** if **either**:
 
-    -7 <= days <= 15  →  "Make Ready"
-    otherwise         →  base "Service Technician", then refined by Location:
+- **Move-in window:** unit is known, move-in and created date exist, and
+  ``days_since_move_in = created_date - move_in_date`` is between ``-7`` and ``15`` (inclusive).
+
+- **Service Category / Issue:** either column (case-insensitive) contains
+  ``inspection and make ready`` or ``make ready`` (e.g. category
+  "Inspection and make ready", issue "Make Ready" or
+  "Make ready/move-out inspection"). Applies even outside the move-in window and
+  skips Service Tech location refinement.
+
+Otherwise → base **Service Technician**, refined by Location:
 
     Location matches unit pattern (phase-building-unit)  →  "Service Technician"
     Else if Location contains Fitness, Clubhouse, Game Room, or Dining
@@ -57,6 +64,26 @@ _COMMON_AREA_LOCATION_SUBSTRINGS: tuple[str, ...] = (
     "Grounds",
     "Exterior",
 )
+
+# Substrings in "Service Category" / "Issue" that force Make Ready (case-insensitive).
+_MAKE_READY_TEXT_MARKERS: tuple[str, ...] = (
+    "inspection and make ready",
+    "make ready",
+)
+
+
+def _excel_cell_str(val: object) -> str:
+    """Normalize an Excel cell for text matching; empty if missing or NaN."""
+    if val is None or pd.isna(val):
+        return ""
+    return str(val).strip()
+
+
+def _is_make_ready_by_service_category_or_issue(rec: dict) -> bool:
+    """True when Service Category or Issue indicates inspection / make-ready work."""
+    sc = _excel_cell_str(rec.get("Service Category")).casefold()
+    issue = _excel_cell_str(rec.get("Issue")).casefold()
+    return any(m in sc or m in issue for m in _MAKE_READY_TEXT_MARKERS)
 
 
 def _matches_unit_pattern(location: str) -> bool:
@@ -141,29 +168,37 @@ def validate(property_id: int, sr_file_content: bytes) -> list[dict]:
         unit_norm = normalize_unit_code(location)
         unit_id = unit_lookup.get(unit_norm)
 
-        if unit_id is None:
+        days_since: int | None = None
+        move_in: date | None = None
+        if unit_id is not None:
+            move_in = occupancy.get(unit_id)
+            created_raw = rec.get("Created date")
+            if move_in is not None and pd.notna(created_raw):
+                try:
+                    created_dt = pd.Timestamp(created_raw).date()
+                    days_since = (created_dt - move_in).days
+                except Exception:
+                    pass
+
+        by_move_in_window = (
+            unit_id is not None
+            and move_in is not None
+            and days_since is not None
+            and MAKE_READY_MIN_DAYS <= days_since <= MAKE_READY_MAX_DAYS
+        )
+        by_service_text = _is_make_ready_by_service_category_or_issue(rec)
+
+        if by_move_in_window or by_service_text:
+            wo = "Make Ready"
+        elif unit_id is None:
             wo = _classify(None, None, unit_found=False)
             if wo == "Service Technician":
                 wo = _refine_service_technician_label(location)
-            rec["wo_classification"] = wo
-            rec["days_since_move_in"] = None
-            results.append(rec)
-            continue
+        else:
+            wo = _classify(days_since, move_in, unit_found=True)
+            if wo == "Service Technician":
+                wo = _refine_service_technician_label(location)
 
-        move_in: date | None = occupancy.get(unit_id)
-
-        created_raw = rec.get("Created date")
-        days_since: int | None = None
-        if move_in is not None and pd.notna(created_raw):
-            try:
-                created_dt = pd.Timestamp(created_raw).date()
-                days_since = (created_dt - move_in).days
-            except Exception:
-                pass
-
-        wo = _classify(days_since, move_in, unit_found=True)
-        if wo == "Service Technician":
-            wo = _refine_service_technician_label(location)
         rec["wo_classification"] = wo
         rec["days_since_move_in"] = days_since
         results.append(rec)
