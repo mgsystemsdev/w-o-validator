@@ -7,6 +7,7 @@ import logging
 from datetime import date, datetime
 from typing import Any
 
+from psycopg2 import errors as pg_errors
 from psycopg2.extras import RealDictCursor
 
 from db.connection import get_connection
