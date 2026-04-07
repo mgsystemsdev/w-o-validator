@@ -19,10 +19,10 @@ Built to replace manual spreadsheet triage with a repeatable, data-driven workfl
 
 | Condition | Label |
 |-----------|-------|
-| Move-in within **-7 to +15 days** of WO creation | **Make Ready** |
-| Unit-level location, outside window | **Service Technician** |
-| Fitness / Clubhouse / Game Room / Dining | **Service Tech – Amenities** |
-| Pool / Grounds / Exterior | **Service Tech – Common Area** |
+| Category/issue mentions make-ready text, move-in **-7…+15** (or **-7…+30** when unit is anchored), or assignee allowlist | **Make Ready** |
+| `Location` matches **unit pattern** (phase-building), outside make-ready | **Service Technician** |
+| Non-unit `Location` with Pool / Grounds / Exterior | **Service Tech – Common Area** (+ venue) |
+| Any other **non-unit** `Location` (parks, office, etc.) | **Service Tech – Amenities** (+ venue) |
 
 ---
 

@@ -82,7 +82,7 @@ Pure functions for unit code handling — safe to unit-test with no mocking:
 ### Work Order Classification Logic (`services/work_order_validator_service.py`)
 
 - **Make Ready** if: category/issue text (“make ready” / “inspection and make ready”), **or** move-in window **−7…+15** days, **or** (unit has an anchor from strict window) **−7…+30** days, **or** assignee on the make-ready technician allowlist (last).
-- Non–Make Ready: location refines **Service Technician** vs **Service Tech – Amenities** vs **Service Tech – Common Area**; amenities/common rows append a **venue** suffix from `Location` when derivable.
+- Non–Make Ready: **unit-pattern** `Location` → **Service Technician**; **Pool/Grounds/Exterior** → **Service Tech – Common Area** (+ venue); any other **non-unit** `Location` → **Service Tech – Amenities** (+ venue, default fallback).
 - East/West Active SR workbooks include **Amenities** and **Common Area** `raw_dump` sheets (property-wide, prefix match on classification).
 
 ### Report Building (`services/report_operations/active_sr_report.py`)

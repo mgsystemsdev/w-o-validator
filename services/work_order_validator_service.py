@@ -24,11 +24,11 @@ Classification rules — a row is **Make Ready** if **any** of the following hol
 Otherwise → base **Service Technician**, refined by Location:
 
     Location matches unit pattern (phase-building-unit)  →  "Service Technician"
-    Else if Location contains Fitness, Clubhouse, Game Room, or Dining
-        →  "Service Tech – Amenities" + optional `` – {venue}``
     Else if Location contains Pool, Grounds, or Exterior
         →  "Service Tech – Common Area" + optional `` – {venue}``
-    Else  →  "Service Technician"
+    Else if Location contains Fitness, Clubhouse, Game Room, or Dining
+        →  "Service Tech – Amenities" + optional `` – {venue}`` (keyword stripped)
+    Else  →  "Service Tech – Amenities" + `` – {location}`` (non-unit default fallback)
 """
 
 from __future__ import annotations
@@ -163,15 +163,24 @@ def _with_venue_suffix(location: str, base_label: str) -> str:
     return f"{base_label} – {venue}"
 
 
+def _amenities_label_for_non_unit_location(location: str) -> str:
+    """Amenities label: use keyword-based venue when possible, else full cleaned location."""
+    loc_lower = location.casefold()
+    if _first_matching_substring(loc_lower, _AMENITY_LOCATION_SUBSTRINGS):
+        return _with_venue_suffix(location, _LABEL_AMENITIES)
+    venue = " ".join(location.strip().split())
+    if venue:
+        return f"{_LABEL_AMENITIES} – {venue}"
+    return _LABEL_AMENITIES
+
+
 def _refine_service_technician_label(location: str) -> str:
     if _matches_unit_pattern(location):
         return "Service Technician"
     loc_lower = location.casefold()
-    if _first_matching_substring(loc_lower, _AMENITY_LOCATION_SUBSTRINGS):
-        return _with_venue_suffix(location, _LABEL_AMENITIES)
     if _first_matching_substring(loc_lower, _COMMON_AREA_LOCATION_SUBSTRINGS):
         return _with_venue_suffix(location, _LABEL_COMMON)
-    return "Service Technician"
+    return _amenities_label_for_non_unit_location(location)
 
 
 def _classify(days_since: int | None, move_in_date: date | None, unit_found: bool) -> str:
