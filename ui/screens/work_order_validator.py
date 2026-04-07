@@ -228,11 +228,20 @@ def render_work_order_validator() -> None:
             )
 
             if west_bytes and east_bytes and summary:
-                st.success(
-                    f"**{summary['total']}** work orders classified — "
-                    f"**{summary['make_ready']}** Make Ready, "
-                    f"**{summary['service_tech']}** Service Technician."
-                )
+                if "amenities" in summary:
+                    st.success(
+                        f"**{summary['total']}** work orders classified — "
+                        f"**{summary['make_ready']}** Make Ready, "
+                        f"**{summary['amenities']}** Amenities, "
+                        f"**{summary['common_area']}** Common area, "
+                        f"**{summary['service_tech_unit']}** unit/other Service Tech."
+                    )
+                else:
+                    st.success(
+                        f"**{summary['total']}** work orders classified — "
+                        f"**{summary['make_ready']}** Make Ready, "
+                        f"**{summary['service_tech']}** Service Technician."
+                    )
                 if snap:
                     st.caption(
                         f"Generated **{report_date or '—'}** · file saved "

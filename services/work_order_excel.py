@@ -13,6 +13,7 @@ WO Classification cell coloring:
   Make Ready              → green (#C6EFCE)
   Service Technician      → no fill
   Service Tech – Common … → light gray (#D9D9D9)
+  Service Tech – Amenities… → light blue (#BDD7EE)
 """
 
 from __future__ import annotations
@@ -89,7 +90,9 @@ def _classification_fill(classification: str) -> PatternFill | None:
         return _fill(_C_MR)
     if "Common Area" in c:
         return _fill(_C_UNRESOLVED)
-    return None  # Service Technician — no fill
+    if "Amenities" in c:
+        return _fill(_C_SECTION_IP)  # light blue — distinct from MR / common area
+    return None  # plain Service Technician — no fill
 
 
 def _safe_val(row: dict, key: str) -> Any:

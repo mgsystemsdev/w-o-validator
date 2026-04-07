@@ -1,26 +1,33 @@
 """Work Order Validator service.
 
 Classifies active service request work orders as "Make Ready" or
-"Service Technician" based on move-in timing and SR text fields.
+"Service Technician" based on move-in timing, SR text fields, assignee, and Location.
 
-Classification rules — a row is **Make Ready** if **either**:
+Classification rules — a row is **Make Ready** if **any** of the following holds
+(evaluation order):
 
-- **Move-in window:** unit is known, move-in and created date exist, and
-  ``days_since_move_in = created_date - move_in_date`` is between ``-7`` and ``15`` (inclusive).
+1. **Service Category / Issue:** either column (case-insensitive) contains
+   ``inspection and make ready`` or ``make ready``.
 
-- **Service Category / Issue:** either column (case-insensitive) contains
-  ``inspection and make ready`` or ``make ready`` (e.g. category
-  "Inspection and make ready", issue "Make Ready" or
-  "Make ready/move-out inspection"). Applies even outside the move-in window and
-  skips Service Tech location refinement.
+2. **Move-in window (strict):** unit is known, move-in and created date exist, and
+   ``days_since_move_in`` is between ``-7`` and ``15`` (inclusive).
+
+3. **Move-in window (extended):** the unit appears in ``anchor_units`` — at least
+   one **other** row for the same normalized unit qualified under the **strict**
+   window only (not via text or assignee) — and ``days_since_move_in`` is between
+   ``-7`` and ``30`` (inclusive).
+
+4. **Assignee allowlist (last resort):** ``Assigned to`` matches a configured
+   make-ready technician name (trim + case-insensitive). Does not apply to
+   ``Unassigned`` / ``Any technician``.
 
 Otherwise → base **Service Technician**, refined by Location:
 
     Location matches unit pattern (phase-building-unit)  →  "Service Technician"
     Else if Location contains Fitness, Clubhouse, Game Room, or Dining
-        →  "Service Tech – Amenities"
+        →  "Service Tech – Amenities" + optional `` – {venue}``
     Else if Location contains Pool, Grounds, or Exterior
-        →  "Service Tech – Common Area"
+        →  "Service Tech – Common Area" + optional `` – {venue}``
     Else  →  "Service Technician"
 """
 
@@ -28,6 +35,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 from datetime import date
 
 import pandas as pd
@@ -45,7 +53,8 @@ logger = logging.getLogger(__name__)
 # Classification thresholds
 # ---------------------------------------------------------------------------
 MAKE_READY_MIN_DAYS = -7   # pre-move-in prep window
-MAKE_READY_MAX_DAYS = 15   # post-move-in grace window
+MAKE_READY_MAX_DAYS = 15   # post-move-in grace window (strict)
+MAKE_READY_EXTENDED_MAX_DAYS = 30  # extended upper bound when unit is anchored
 
 # ---------------------------------------------------------------------------
 # Phase → manager group mapping
@@ -54,9 +63,9 @@ MABI_PHASES: frozenset[str] = frozenset({"3", "4", "4C", "4S"})
 ROBERT_PHASES: frozenset[str] = frozenset({"5", "7", "8"})
 
 _AMENITY_LOCATION_SUBSTRINGS: tuple[str, ...] = (
+    "Game Room",
     "Fitness",
     "Clubhouse",
-    "Game Room",
     "Dining",
 )
 _COMMON_AREA_LOCATION_SUBSTRINGS: tuple[str, ...] = (
@@ -70,6 +79,21 @@ _MAKE_READY_TEXT_MARKERS: tuple[str, ...] = (
     "inspection and make ready",
     "make ready",
 )
+
+# Assigned-to names that force Make Ready when nothing above matched (case-insensitive).
+_MAKE_READY_ASSIGNEE_NAMES: frozenset[str] = frozenset(
+    {
+        "miguel gonzalez",
+        "michael huang",
+        "miguel gil",
+        "chuck griffis",
+        "chuck griffi",
+        "rafael anez",
+    }
+)
+
+_LABEL_AMENITIES = "Service Tech – Amenities"
+_LABEL_COMMON = "Service Tech – Common Area"
 
 
 def _excel_cell_str(val: object) -> str:
@@ -86,21 +110,67 @@ def _is_make_ready_by_service_category_or_issue(rec: dict) -> bool:
     return any(m in sc or m in issue for m in _MAKE_READY_TEXT_MARKERS)
 
 
+def _is_make_ready_by_assignee(rec: dict) -> bool:
+    """True when Assigned to is on the make-ready technician allowlist."""
+    name = _excel_cell_str(rec.get("Assigned to")).casefold()
+    if not name or name in ("unassigned", "any technician"):
+        return False
+    return name in _MAKE_READY_ASSIGNEE_NAMES
+
+
 def _matches_unit_pattern(location: str) -> bool:
     parts = parse_unit_parts(normalize_unit_code(location))
     return parts["phase_code"] is not None and parts["building_code"] is not None
+
+
+def _first_matching_substring(loc_lower: str, substrings: tuple[str, ...]) -> str | None:
+    """Return the first substring from ``substrings`` that appears in ``loc_lower`` (longest first)."""
+    for sub in sorted(substrings, key=len, reverse=True):
+        if sub.casefold() in loc_lower:
+            return sub
+    return None
+
+
+def _venue_remainder_after_keyword(location: str, keyword: str) -> str:
+    """Strip the matched keyword from location; return a concise venue label."""
+    raw = location.strip()
+    if not keyword:
+        return raw
+    pattern = re.compile(re.escape(keyword), re.IGNORECASE)
+    m = pattern.search(raw)
+    if not m:
+        return raw
+    before = raw[: m.start()].strip(" \t-–—")
+    after = raw[m.end() :].strip(" \t-–—")
+    part = after if after else before
+    part = " ".join(part.split())
+    return part if part else keyword
+
+
+def _with_venue_suffix(location: str, base_label: str) -> str:
+    """Append `` – {venue}`` for amenities/common area when we can derive a venue."""
+    if base_label == _LABEL_AMENITIES:
+        kw = _first_matching_substring(location.casefold(), _AMENITY_LOCATION_SUBSTRINGS)
+    elif base_label == _LABEL_COMMON:
+        kw = _first_matching_substring(location.casefold(), _COMMON_AREA_LOCATION_SUBSTRINGS)
+    else:
+        return base_label
+    if not kw:
+        return base_label
+    venue = _venue_remainder_after_keyword(location, kw)
+    if not venue:
+        return base_label
+    return f"{base_label} – {venue}"
 
 
 def _refine_service_technician_label(location: str) -> str:
     if _matches_unit_pattern(location):
         return "Service Technician"
     loc_lower = location.casefold()
-    for sub in _AMENITY_LOCATION_SUBSTRINGS:
-        if sub.casefold() in loc_lower:
-            return "Service Tech – Amenities"
-    for sub in _COMMON_AREA_LOCATION_SUBSTRINGS:
-        if sub.casefold() in loc_lower:
-            return "Service Tech – Common Area"
+    if _first_matching_substring(loc_lower, _AMENITY_LOCATION_SUBSTRINGS):
+        return _with_venue_suffix(location, _LABEL_AMENITIES)
+    if _first_matching_substring(loc_lower, _COMMON_AREA_LOCATION_SUBSTRINGS):
+        return _with_venue_suffix(location, _LABEL_COMMON)
     return "Service Technician"
 
 
@@ -155,16 +225,13 @@ def validate(property_id: int, sr_file_content: bytes) -> list[dict]:
         row["unit_code_norm"]: row["unit_id"] for row in unit_rows
     }
 
-    results: list[dict] = []
+    # Pass A: build per-row timing + anchor units (strict move-in only).
+    row_context: list[dict] = []
+    anchor_units: set[str] = set()
+
     for _, row in df.iterrows():
         rec = dict(row)
         location = str(rec.get("Location") or "").strip()
-
-        phase = _extract_phase(location)
-        building = _extract_building(location)
-        rec["ph"] = phase
-        rec["bld"] = building or ""
-
         unit_norm = normalize_unit_code(location)
         unit_id = unit_lookup.get(unit_norm)
 
@@ -180,15 +247,56 @@ def validate(property_id: int, sr_file_content: bytes) -> list[dict]:
                 except Exception:
                     pass
 
-        by_move_in_window = (
+        by_move_in_strict = (
             unit_id is not None
             and move_in is not None
             and days_since is not None
             and MAKE_READY_MIN_DAYS <= days_since <= MAKE_READY_MAX_DAYS
         )
-        by_service_text = _is_make_ready_by_service_category_or_issue(rec)
+        if by_move_in_strict:
+            anchor_units.add(unit_norm)
 
-        if by_move_in_window or by_service_text:
+        row_context.append(
+            {
+                "rec": rec,
+                "location": location,
+                "unit_norm": unit_norm,
+                "unit_id": unit_id,
+                "move_in": move_in,
+                "days_since": days_since,
+                "by_move_in_strict": by_move_in_strict,
+            }
+        )
+
+    results: list[dict] = []
+    for ctx in row_context:
+        rec = ctx["rec"]
+        location = ctx["location"]
+        unit_norm = ctx["unit_norm"]
+        unit_id = ctx["unit_id"]
+        move_in = ctx["move_in"]
+        days_since = ctx["days_since"]
+        by_move_in_strict = ctx["by_move_in_strict"]
+
+        phase = _extract_phase(location)
+        building = _extract_building(location)
+        rec["ph"] = phase
+        rec["bld"] = building or ""
+
+        by_service_text = _is_make_ready_by_service_category_or_issue(rec)
+        by_move_in_extended = (
+            unit_id is not None
+            and move_in is not None
+            and days_since is not None
+            and unit_norm in anchor_units
+            and MAKE_READY_MIN_DAYS <= days_since <= MAKE_READY_EXTENDED_MAX_DAYS
+        )
+
+        if by_service_text:
+            wo = "Make Ready"
+        elif by_move_in_strict or by_move_in_extended:
+            wo = "Make Ready"
+        elif _is_make_ready_by_assignee(rec):
             wo = "Make Ready"
         elif unit_id is None:
             wo = _classify(None, None, unit_found=False)
@@ -224,10 +332,34 @@ def get_summary(rows: list[dict]) -> dict:
     """Return classification counts for the UI summary display."""
     total = len(rows)
     make_ready = sum(1 for r in rows if r.get("wo_classification") == "Make Ready")
+
+    def _norm_wo(r: dict) -> str:
+        s = str(r.get("wo_classification") or "").lower()
+        for ch in ("–", "—"):
+            s = s.replace(ch, "-")
+        return s
+
+    amenities = sum(
+        1
+        for r in rows
+        if r.get("wo_classification") != "Make Ready"
+        and _norm_wo(r).startswith("service tech - amenities")
+    )
+    common_area = sum(
+        1
+        for r in rows
+        if r.get("wo_classification") != "Make Ready"
+        and _norm_wo(r).startswith("service tech - common area")
+    )
+    service_tech_other = total - make_ready - amenities - common_area
+
     return {
         "total": total,
         "make_ready": make_ready,
         "service_tech": total - make_ready,
+        "amenities": amenities,
+        "common_area": common_area,
+        "service_tech_unit": service_tech_other,
     }
 
 

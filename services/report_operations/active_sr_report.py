@@ -109,6 +109,9 @@ class SheetDef:
     kind      – "horizontal" (default) or "raw_dump" (ServiceRequest sheet).
     phases    – optional phase filter applied to raw_dump sheets before writing.
                 None = no filtering (all rows passed through).
+    classification – optional ``wo_classification`` filter for ``raw_dump`` sheets.
+    classification_mode – ``"exact"`` (default) or ``"prefix"`` for that filter
+                (en/em dashes normalized to hyphen for comparison).
     """
 
     tab_name: str
@@ -118,6 +121,7 @@ class SheetDef:
     kind: str = "horizontal"
     phases: frozenset[str] | None = None
     classification: str | None = None
+    classification_mode: str = "exact"
 
 
 @dataclass(frozen=True)
@@ -299,6 +303,24 @@ def _write_horizontal_sheet(
 # ---------------------------------------------------------------------------
 
 
+def _normalize_wo_classification(val: object) -> str:
+    """Lowercase and normalize unicode dashes for classification string compares."""
+    t = str(val or "").lower()
+    for ch in ("\u2013", "\u2014"):  # en dash, em dash
+        t = t.replace(ch, "-")
+    return t
+
+
+def _classification_filter_match(row: dict, spec: str, mode: str) -> bool:
+    wc = _normalize_wo_classification(row.get("wo_classification"))
+    sp = _normalize_wo_classification(spec)
+    if mode == "prefix":
+        return wc.startswith(sp)
+    if mode != "exact":
+        raise ValueError(f"classification_mode must be 'exact' or 'prefix'; got {mode!r}")
+    return wc == sp
+
+
 def _render_report(config: ReportConfig, rows: list[dict]) -> Workbook:
     wb = Workbook()
     wb.remove(wb.active)  # remove default blank sheet
@@ -309,14 +331,19 @@ def _render_report(config: ReportConfig, rows: list[dict]) -> Workbook:
             rows_to_write = (
                 _filter_rows(rows, FilterParams(phases=sheet_def.phases))
                 if sheet_def.phases is not None
-                else rows
+                else list(rows)
             )
             if sheet_def.classification is not None:
-                clsf = sheet_def.classification.lower()
                 rows_to_write = [
-                    r for r in rows_to_write
-                    if str(r.get("wo_classification") or "").lower() == clsf
+                    r
+                    for r in rows_to_write
+                    if _classification_filter_match(
+                        r,
+                        sheet_def.classification,
+                        sheet_def.classification_mode,
+                    )
                 ]
+            rows_to_write = sorted(rows_to_write, key=_safe_days, reverse=True)
             _write_flat_sheet(ws, rows_to_write, header_bg=_C_HEADER_BLACK)
             num_cols = len(_HEADER_LABELS)
             ws.auto_filter.ref = f"A1:{get_column_letter(num_cols)}1"
@@ -604,6 +631,28 @@ WEST_CONFIG = ReportConfig(
             phases=_PHASES_WEST,
             classification="Make Ready",
         ),
+
+        # Sheet 9–10: amenities / common area — property-wide (no phase filter)
+        SheetDef(
+            tab_name="Amenities",
+            sections=[],
+            title_row=1,
+            data_row=1,
+            kind="raw_dump",
+            phases=None,
+            classification="Service Tech – Amenities",
+            classification_mode="prefix",
+        ),
+        SheetDef(
+            tab_name="Common Area",
+            sections=[],
+            title_row=1,
+            data_row=1,
+            kind="raw_dump",
+            phases=None,
+            classification="Service Tech – Common Area",
+            classification_mode="prefix",
+        ),
     ],
 )
 
@@ -838,6 +887,27 @@ EAST_CONFIG = ReportConfig(
             kind="raw_dump",
             phases=_PHASES_EAST,
             classification="Make Ready",
+        ),
+
+        SheetDef(
+            tab_name="Amenities",
+            sections=[],
+            title_row=1,
+            data_row=1,
+            kind="raw_dump",
+            phases=None,
+            classification="Service Tech – Amenities",
+            classification_mode="prefix",
+        ),
+        SheetDef(
+            tab_name="Common Area",
+            sections=[],
+            title_row=1,
+            data_row=1,
+            kind="raw_dump",
+            phases=None,
+            classification="Service Tech – Common Area",
+            classification_mode="prefix",
         ),
     ],
 )
