@@ -70,7 +70,17 @@ def get_connection():
                     "override secrets before this fix; split keys in secrets now win). "
                     "Restart Streamlit and **Clear cache**."
                 ) from exc
-            raise
+            raise RuntimeError(
+                "Database connection failed. On Streamlit Cloud, set **Deploy → Secrets** "
+                "to match Supabase **Transaction pooler** (port **6543**), user "
+                "``postgres.<project-ref>``, and ``sslmode=require``. "
+                f"Details: {exc}"
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(
+                "Database connection failed (non-operational error). Check secrets and "
+                f"psycopg2 compatibility. Details: {exc}"
+            ) from exc
         _local.conn.autocommit = True
     return _local.conn
 
