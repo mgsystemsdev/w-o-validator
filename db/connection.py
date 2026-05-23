@@ -70,6 +70,19 @@ def get_connection():
                     "override secrets before this fix; split keys in secrets now win). "
                     "Restart Streamlit and **Clear cache**."
                 ) from exc
+            # PgBouncer on Supabase: wrong pooler region or wrong postgres.<ref> user
+            if "tenant" in msg and "not found" in msg:
+                raise RuntimeError(
+                    "Supabase pooler rejected the database user. **Do not** copy a host "
+                    "from an example: open **Project Settings → Database** in the **same** "
+                    "project and use the **Transaction pooler** connection. "
+                    "``DATABASE_HOST`` must be the **pooler** hostname for *your* region "
+                    "(e.g. ``aws-0-….pooler.supabase.com`` from the dashboard, not a "
+                    "different region’s host). Set ``DATABASE_USER = postgres.<project-ref>`` "
+                    "where **project-ref** is your project’s subdomain in "
+                    "``<ref>.supabase.co`` (Settings → General). Mismatched region + user "
+                    "causes: ``tenant/user … not found``."
+                ) from exc
             raise RuntimeError(
                 "Database connection failed. On Streamlit Cloud, set **Deploy → Secrets** "
                 "to match Supabase **Transaction pooler** (port **6543**), user "
